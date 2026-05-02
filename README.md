@@ -51,3 +51,7 @@ Luego abre la app en Android, iOS o web desde Expo.
 - La UI no accede directamente a storage ni al backend.
 - El repositorio decide si responde con datos remotos o cacheados.
 - El nuevo requisito de evaluación se modela por `categoryId`.
+
+## Recursos
+
+- Video relevante: https://www.youtube.com/watch?v=yxrP6QyMbAA
