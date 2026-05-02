@@ -421,6 +421,8 @@ export class AcademicRemoteDatasource {
   }
 
   async getSubmittedEvaluations(input: { cycleId: string; evaluatorUid: string }) {
+    const requestedEvaluator = input.evaluatorUid.trim().toLowerCase();
+
     const byEvaluatorUid = await this.readTable(this.evaluationsTable, {
       cycleId: input.cycleId,
       evaluatorUid: input.evaluatorUid,
@@ -433,8 +435,19 @@ export class AcademicRemoteDatasource {
           evaluatorUId: input.evaluatorUid,
         });
 
+    let rows = [...byEvaluatorUid, ...byEvaluatorUId];
+
+    if (rows.length === 0) {
+      const cycleRows = await this.readTable(this.evaluationsTable, { cycleId: input.cycleId });
+      rows = cycleRows.filter((row) => {
+        const evaluatorValue = this.str(row.evaluatorUid).trim().toLowerCase();
+        const evaluatorValueAlt = this.str(row.evaluatorUId).trim().toLowerCase();
+        return evaluatorValue === requestedEvaluator || evaluatorValueAlt === requestedEvaluator;
+      });
+    }
+
     const unique = new Map<string, Row>();
-    for (const row of [...byEvaluatorUid, ...byEvaluatorUId]) {
+    for (const row of rows) {
       const rowId = this.str(row._id);
       const key = rowId || `${this.str(row.cycleId)}-${this.str(row.evaluatorUid)}-${this.str(row.evaluateeUid)}`;
       unique.set(key, row);
@@ -602,6 +615,7 @@ export class AcademicRemoteDatasource {
         cycle,
         group,
         categoryName,
+        category: { name: categoryName },
         peersToEvaluate,
         alreadyEvaluatedUids: [...alreadyEvaluatedUids],
       });
@@ -637,11 +651,24 @@ export class AcademicRemoteDatasource {
     const evaluatorEnrollment = await this.findActiveStudentInGroups(input.evaluatorUid, categoryGroupIds);
     const evaluateeEnrollment = await this.findActiveStudentInGroups(input.evaluateeUid, categoryGroupIds);
 
-    const existing = await this.readTable(this.evaluationsTable, {
+    let existing = await this.readTable(this.evaluationsTable, {
       cycleId: input.cycleId,
       evaluatorUid: input.evaluatorUid,
       evaluateeUid: input.evaluateeUid,
     });
+
+    if (existing.length === 0) {
+      const cycleRows = await this.readTable(this.evaluationsTable, { cycleId: input.cycleId });
+      const requestedEvaluator = input.evaluatorUid.trim().toLowerCase();
+      existing = cycleRows.filter((row) => {
+        const evaluatorValue = this.str(row.evaluatorUid).trim().toLowerCase();
+        const evaluatorValueAlt = this.str(row.evaluatorUId).trim().toLowerCase();
+        return (
+          this.str(row.evaluateeUid).trim().toLowerCase() === input.evaluateeUid.trim().toLowerCase() &&
+          (evaluatorValue === requestedEvaluator || evaluatorValueAlt === requestedEvaluator)
+        );
+      });
+    }
 
     const payload = {
       cycleId: input.cycleId,

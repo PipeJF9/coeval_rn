@@ -131,7 +131,10 @@ export class AcademicRepositoryImpl implements AcademicRepository {
     const cached = await this._getCachedData<PendingEvaluationInfo[]>(cacheKey);
     if (cached) {
       console.log(`[ACADEMIC] Loaded pending evaluations from cache for ${input.studentEmail}`);
-      return cached;
+      return cached.map((item) => ({
+        ...item,
+        category: item.category ?? { name: item.categoryName ?? '' },
+      }));
     }
 
     // Cache miss: fetch from remote

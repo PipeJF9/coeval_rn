@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -67,17 +67,30 @@ export function EvaluatePeersScreen({ navigation, route }: Props) {
 
       if (success) {
         setSubmittedUids((current) => [...current, peerUid]);
+        Alert.alert('Evaluación enviada', 'Tu evaluación se guardó correctamente.');
+      } else {
+        Alert.alert('Error', 'No se pudo enviar la evaluación. Por favor intenta de nuevo.');
       }
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  useEffect(() => {
+    if (pending && pendingPeers.length === 0) {
+      const timeout = setTimeout(() => {
+        navigation.goBack();
+      }, 1200);
+      return () => clearTimeout(timeout);
+    }
+    return undefined;
+  }, [navigation, pending, pendingPeers.length]);
+
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <View style={styles.headerCard}>
         <Text style={styles.headerTitle}>{pending.cycle.title}</Text>
-        <Text style={styles.headerSubtitle}>{pending.category.name}</Text>
+        <Text style={styles.headerSubtitle}>{pending.category?.name ?? pending.categoryName}</Text>
         <Text style={styles.headerMeta}>{pendingPeers.length} compañeros por evaluar</Text>
       </View>
 

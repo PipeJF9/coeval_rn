@@ -69,6 +69,9 @@ export interface PendingEvaluationInfo {
   cycle: EvaluationCycleData;
   group: GroupOverview;
   categoryName: string;
+  category: {
+    name: string;
+  };
   peersToEvaluate: StudentOverview[];
   alreadyEvaluatedUids: string[];
 }

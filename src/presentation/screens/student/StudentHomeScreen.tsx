@@ -48,7 +48,7 @@ export function StudentHomeScreen() {
                 <View key={pending.cycle.id} style={styles.pendingRow}>
                   <View style={styles.pendingTextBlock}>
                     <Text style={styles.pendingTitle}>{pending.cycle.title}</Text>
-                    <Text style={styles.pendingSubtitle}>{pending.category.name}</Text>
+                    <Text style={styles.pendingSubtitle}>{pending.category?.name ?? pending.categoryName}</Text>
                   </View>
                   <View style={styles.pendingBadge}>
                     <MaterialCommunityIcons name="clipboard-text-outline" size={14} color="#FFFFFF" />

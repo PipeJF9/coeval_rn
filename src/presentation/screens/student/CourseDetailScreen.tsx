@@ -51,7 +51,7 @@ export function CourseDetailScreen({ navigation, route }: Props) {
               <View key={pending.cycle.id} style={styles.pendingCard}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.pendingTitle}>{pending.cycle.title}</Text>
-                  <Text style={styles.pendingSubtitle}>{pending.category.name}</Text>
+                  <Text style={styles.pendingSubtitle}>{pending.category?.name ?? pending.categoryName}</Text>
                   <Text style={styles.pendingDetails}>{remaining} compañeros por evaluar</Text>
                 </View>
                 <Pressable
