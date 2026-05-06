@@ -23,7 +23,7 @@ const teacherRemoteDataSource = new TeacherRemoteDataSource(robleDatasource);
 
 const authRepository = new AuthRepositoryImpl(authRemoteDatasource, localCacheDatasource);
 const academicRepository = new AcademicRepositoryImpl(academicRemoteDatasource);
-const dashboardRepository = new DashboardRepositoryImpl(dashboardRemoteDatasource);
+const dashboardRepository = new DashboardRepositoryImpl(dashboardRemoteDatasource, localCacheDatasource);
 const teacherRepository = new TeacherRepositoryImpl(teacherRemoteDataSource);
 
 export const authUseCases = {

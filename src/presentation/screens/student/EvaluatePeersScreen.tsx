@@ -58,6 +58,7 @@ export function EvaluatePeersScreen({ navigation, route }: Props) {
         : [Math.round(peerScores[0] ?? 3)];
       const comment = comments[peerUid]?.trim();
 
+      console.log('[SCREEN:EVALUATE_PEERS] Submitting evaluation...');
       const success = await submitEvaluation({
         cycleId: pending.cycle.id,
         evaluateeUid: peerUid,
@@ -65,12 +66,16 @@ export function EvaluatePeersScreen({ navigation, route }: Props) {
         comments: comment || null,
       });
 
+      console.log('[SCREEN:EVALUATE_PEERS] Submit result:', success);
       if (success) {
         setSubmittedUids((current) => [...current, peerUid]);
         Alert.alert('Evaluación enviada', 'Tu evaluación se guardó correctamente.');
       } else {
         Alert.alert('Error', 'No se pudo enviar la evaluación. Por favor intenta de nuevo.');
       }
+    } catch (error) {
+      console.error('[SCREEN:EVALUATE_PEERS] Error during submit:', error);
+      Alert.alert('Error', `Error: ${error}`);
     } finally {
       setIsSubmitting(false);
     }

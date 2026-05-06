@@ -1,5 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { academicUseCases, dashboardUseCases } from '../../di/container';
 import {
   EvaluationResult,
@@ -49,7 +48,7 @@ export function StudentProvider({ children }: { children: React.ReactNode }) {
     setResults([]);
   };
 
-  const refreshCourses = async () => {
+  const refreshCourses = useCallback(async () => {
     if (!isAuthenticated || !user || user.role !== 'student') {
       clearStudentState();
       return;
@@ -62,13 +61,16 @@ export function StudentProvider({ children }: { children: React.ReactNode }) {
         studentUid: studentUid || null,
       });
       setCourses(value);
+    } catch (error) {
+      console.error('[StudentContext] refreshCourses failed:', error);
+      setCourses([]);
     } finally {
       setIsLoadingCourses(false);
     }
-  };
+  }, [isAuthenticated, studentEmail, studentUid]);
 
-  const refreshPendingEvaluations = async () => {
-    if (!isAuthenticated || !user || user.role !== 'student' || !studentEmail && !studentUid) {
+  const refreshPendingEvaluations = useCallback(async () => {
+    if (!isAuthenticated || !user || user.role !== 'student' || (!studentEmail && !studentUid)) {
       setPendingEvaluations([]);
       return;
     }
@@ -80,13 +82,17 @@ export function StudentProvider({ children }: { children: React.ReactNode }) {
         studentUid: studentUid || studentEmail,
       });
       setPendingEvaluations(value);
+    } catch (error) {
+      console.error('[StudentContext] refreshPendingEvaluations failed:', error);
+      setPendingEvaluations([]);
     } finally {
       setIsLoadingPending(false);
     }
-  };
+  }, [isAuthenticated, studentEmail, studentUid]);
 
-  const refreshResults = async () => {
-    if (!isAuthenticated || !user || user.role !== 'student' || !studentEmail && !studentUid) {
+  
+  const refreshResults = useCallback(async () => {
+    if (!isAuthenticated || !user || user.role !== 'student' || (!studentEmail && !studentUid)) {
       setResults([]);
       return;
     }
@@ -98,10 +104,13 @@ export function StudentProvider({ children }: { children: React.ReactNode }) {
         studentEmail,
       });
       setResults(value);
+    } catch (error) {
+      console.error('[StudentContext] refreshResults failed:', error);
+      setResults([]);
     } finally {
-      setIsLoadingResults(false);
+      setIsLoadingResults(false); // ← ya lo tienes, está bien
     }
-  };
+  }, [isAuthenticated, studentEmail, studentUid]);
 
   const refreshAll = async () => {
     await Promise.all([refreshCourses(), refreshPendingEvaluations(), refreshResults()]);

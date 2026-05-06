@@ -51,11 +51,27 @@ export class AcademicRemoteDatasource {
   }
 
   private async insertRecord(tableName: string, record: Row) {
-    return this.robleDatasource.insertRecord(tableName, record);
+    try {
+      this._log('INSERT_RECORD', `Inserting into ${tableName}: ${JSON.stringify(record)}`);
+      const result = await this.robleDatasource.insertRecord(tableName, record);
+      this._log('INSERT_RECORD', `Result for ${tableName}: ${result}`);
+      return result;
+    } catch (error) {
+      this._log('INSERT_RECORD', `Error inserting into ${tableName}: ${error}`);
+      throw error;
+    }
   }
 
   private async updateRecord(tableName: string, where: Row, set: Row) {
-    return this.robleDatasource.updateRecord(tableName, where, set);
+    try {
+      this._log('UPDATE_RECORD', `Updating ${tableName} with where=${JSON.stringify(where)}, set=${JSON.stringify(set)}`);
+      const result = await this.robleDatasource.updateRecord(tableName, where, set);
+      this._log('UPDATE_RECORD', `Result for ${tableName}: ${result}`);
+      return result;
+    } catch (error) {
+      this._log('UPDATE_RECORD', `Error updating ${tableName}: ${error}`);
+      throw error;
+    }
   }
 
   private normalizeCategoryString(raw: string) {
@@ -423,28 +439,10 @@ export class AcademicRemoteDatasource {
   async getSubmittedEvaluations(input: { cycleId: string; evaluatorUid: string }) {
     const requestedEvaluator = input.evaluatorUid.trim().toLowerCase();
 
-    const byEvaluatorUid = await this.readTable(this.evaluationsTable, {
+    const rows = await this.readTable(this.evaluationsTable, {
       cycleId: input.cycleId,
       evaluatorUid: input.evaluatorUid,
     });
-
-    const byEvaluatorUId = byEvaluatorUid.length > 0
-      ? []
-      : await this.readTable(this.evaluationsTable, {
-          cycleId: input.cycleId,
-          evaluatorUId: input.evaluatorUid,
-        });
-
-    let rows = [...byEvaluatorUid, ...byEvaluatorUId];
-
-    if (rows.length === 0) {
-      const cycleRows = await this.readTable(this.evaluationsTable, { cycleId: input.cycleId });
-      rows = cycleRows.filter((row) => {
-        const evaluatorValue = this.str(row.evaluatorUid).trim().toLowerCase();
-        const evaluatorValueAlt = this.str(row.evaluatorUId).trim().toLowerCase();
-        return evaluatorValue === requestedEvaluator || evaluatorValueAlt === requestedEvaluator;
-      });
-    }
 
     const unique = new Map<string, Row>();
     for (const row of rows) {
@@ -631,68 +629,102 @@ export class AcademicRemoteDatasource {
     scores: number[];
     comments?: string | null;
   }) {
-    const cycles = await this.readTable(this.evaluationCyclesTable, { _id: input.cycleId });
-    if (cycles.length === 0) {
-      throw new Error('El ciclo de coevaluación no existe');
-    }
+    try {
+      this._log('SUBMIT_EVALUATION', `Starting submission for evaluatorUid=${input.evaluatorUid}, evaluateeUid=${input.evaluateeUid}`);
+      
+      const cycles = await this.readTable(this.evaluationCyclesTable, { _id: input.cycleId });
+      if (cycles.length === 0) {
+        this._log('SUBMIT_EVALUATION', `Error: Cycle not found with id=${input.cycleId}`);
+        throw new Error('El ciclo de coevaluación no existe');
+      }
 
-    const cycle = cycles[0];
-    if (this.str(cycle.status).toLowerCase() !== 'open') {
-      throw new Error('El ciclo está cerrado');
-    }
+      const cycle = cycles[0];
+      if (this.str(cycle.status).toLowerCase() !== 'open') {
+        this._log('SUBMIT_EVALUATION', `Error: Cycle status is ${cycle.status}, not open`);
+        throw new Error('El ciclo está cerrado');
+      }
 
-    // Get categoryId from the group
-    const groupId = this.str(cycle.groupId);
-    const groups = await this.readTable(this.groupsTable, { _id: groupId });
-    const categoryId = groups.length > 0 ? this.str(groups[0].categoryId) : '';
-    
-    const categoryGroupIds = [groupId];
+      // Get categoryId from the group
+      const groupId = this.str(cycle.groupId);
+      this._log('SUBMIT_EVALUATION', `groupId from cycle: ${groupId}`);
 
-    const evaluatorEnrollment = await this.findActiveStudentInGroups(input.evaluatorUid, categoryGroupIds);
-    const evaluateeEnrollment = await this.findActiveStudentInGroups(input.evaluateeUid, categoryGroupIds);
+      const groups = await this.readTable(this.groupsTable, { _id: groupId });
+      const categoryId = groups.length > 0 ? this.str(groups[0].categoryId) : '';
+      
+      this._log('SUBMIT_EVALUATION', `Searching for enrollments with categoryGroupIds=[${groupId}]`);
+      this._log('SUBMIT_EVALUATION', `Looking for evaluator: ${input.evaluatorUid}, evaluatee: ${input.evaluateeUid}`);
 
-    let existing = await this.readTable(this.evaluationsTable, {
-      cycleId: input.cycleId,
-      evaluatorUid: input.evaluatorUid,
-      evaluateeUid: input.evaluateeUid,
-    });
+      const evaluatorEnrollment = await this.findActiveStudentInGroups(input.evaluatorUid, [groupId]);
+      const evaluateeEnrollment = await this.findActiveStudentInGroups(input.evaluateeUid, [groupId]);
 
-    if (existing.length === 0) {
-      const cycleRows = await this.readTable(this.evaluationsTable, { cycleId: input.cycleId });
-      const requestedEvaluator = input.evaluatorUid.trim().toLowerCase();
-      existing = cycleRows.filter((row) => {
-        const evaluatorValue = this.str(row.evaluatorUid).trim().toLowerCase();
-        const evaluatorValueAlt = this.str(row.evaluatorUId).trim().toLowerCase();
-        return (
-          this.str(row.evaluateeUid).trim().toLowerCase() === input.evaluateeUid.trim().toLowerCase() &&
-          (evaluatorValue === requestedEvaluator || evaluatorValueAlt === requestedEvaluator)
-        );
+      this._log('SUBMIT_EVALUATION', `Found evaluator enrollments: ${evaluatorEnrollment.length}, evaluatee enrollments: ${evaluateeEnrollment.length}`);
+      
+      if (evaluatorEnrollment.length > 0) {
+        this._log('SUBMIT_EVALUATION', `Evaluator enrollment: groupId=${this.str(evaluatorEnrollment[0].groupId)}`);
+      }
+      if (evaluateeEnrollment.length > 0) {
+        this._log('SUBMIT_EVALUATION', `Evaluatee enrollment: groupId=${this.str(evaluateeEnrollment[0].groupId)}, _id=${this.str(evaluateeEnrollment[0]._id)}`);
+      }
+
+      let existing = await this.readTable(this.evaluationsTable, {
+        cycleId: input.cycleId,
+        evaluatorUid: input.evaluatorUid,
+        evaluateeUid: input.evaluateeUid,
       });
+
+      if (existing.length === 0) {
+        const cycleRows = await this.readTable(this.evaluationsTable, { cycleId: input.cycleId });
+        const requestedEvaluator = input.evaluatorUid.trim().toLowerCase();
+        existing = cycleRows.filter((row) => {
+          const evaluatorValue = this.str(row.evaluatorUid).trim().toLowerCase();
+          return (
+            this.str(row.evaluateeUid).trim().toLowerCase() === input.evaluateeUid.trim().toLowerCase() &&
+            evaluatorValue === requestedEvaluator
+          );
+        });
+      }
+
+      this._log('SUBMIT_EVALUATION', `Found existing evaluations: ${existing.length}`);
+
+      const payload = {
+        cycleId: input.cycleId,
+        evaluatorUid: input.evaluatorUid,
+        evaluateeUid: input.evaluateeUid,
+        results: { scores: input.scores },
+        comments: input.comments ?? '',
+        updatedAt: new Date().toISOString(),
+        evaluatorGroupIdAtEval: evaluatorEnrollment.length > 0 ? this.str(evaluatorEnrollment[0].groupId) : groupId,
+        evaluateeGroupIdAtEval: evaluateeEnrollment.length > 0 ? this.str(evaluateeEnrollment[0].groupId) : groupId,
+        enrollmentIdAtEval: evaluateeEnrollment.length > 0 ? this.str(evaluateeEnrollment[0]._id) : groupId,
+      };
+      
+      this._log('SUBMIT_EVALUATION', `Payload: ${JSON.stringify(payload)}`);
+
+      if (existing.length > 0) {
+        this._log('SUBMIT_EVALUATION', `Updating existing evaluation with id=${existing[0]._id}`);
+        const result = await this.updateRecord(this.evaluationsTable, { _id: this.str(existing[0]._id) }, payload);
+        this._log('SUBMIT_EVALUATION', `Update complete. Result: ${result}`);
+        if (!result) {
+          throw new Error('Fallo al actualizar la evaluación en Roble');
+        }
+        return true;
+      }
+
+      this._log('SUBMIT_EVALUATION', `Creating new evaluation`);
+      const inserted = await this.insertRecord(this.evaluationsTable, {
+        ...payload,
+        createdAt: new Date().toISOString(),
+      });
+
+      this._log('SUBMIT_EVALUATION', `Insert complete. Result: ${inserted}`);
+      if (!inserted) {
+        throw new Error('Fallo al guardar la evaluación en Roble');
+      }
+      return true;
+    } catch (error) {
+      this._log('SUBMIT_EVALUATION', `FATAL ERROR: ${error}`);
+      throw error;
     }
-
-    const payload = {
-      cycleId: input.cycleId,
-      evaluatorUid: input.evaluatorUid,
-      evaluateeUid: input.evaluateeUid,
-      results: { scores: input.scores },
-      comments: input.comments ?? '',
-      updatedAt: new Date().toISOString(),
-      categoryId,
-      evaluatorGroupIdAtEval: evaluatorEnrollment.length > 0 ? this.str(evaluatorEnrollment[0].groupId) : '',
-      evaluateeGroupIdAtEval: evaluateeEnrollment.length > 0 ? this.str(evaluateeEnrollment[0].groupId) : '',
-      enrollmentIdAtEval: evaluateeEnrollment.length > 0 ? this.str(evaluateeEnrollment[0]._id) : null,
-    };
-
-    if (existing.length > 0) {
-      return this.updateRecord(this.evaluationsTable, { _id: this.str(existing[0]._id) }, payload);
-    }
-
-    const inserted = await this.insertRecord(this.evaluationsTable, {
-      ...payload,
-      createdAt: new Date().toISOString(),
-    });
-
-    return inserted != null;
   }
 
   async syncCategoryFromCsv(input: {

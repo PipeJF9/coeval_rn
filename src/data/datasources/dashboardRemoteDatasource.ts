@@ -111,49 +111,53 @@ export class DashboardRemoteDatasource {
     };
   }
 
+
+
   async getResultsForStudent(input: { studentUid: string; studentEmail: string }) {
     const normalizedEmail = input.studentEmail.trim().toLowerCase();
-    const normalizedUid = input.studentUid.trim();
-    const evaluatorKeys = new Set<string>([
-      ...(normalizedUid ? [normalizedUid] : []),
-      ...(normalizedEmail ? [normalizedEmail, `email:${normalizedEmail}`] : []),
+    const normalizedUid  = input.studentUid.trim();
+
+    console.log('[DASHBOARD:GET_RESULTS]', `uid=${normalizedUid}, email=${normalizedEmail}`);
+
+    
+    const [byUid, byEmail, byEmailPrefixed] = await Promise.all([
+      normalizedUid   ? this.readTable(this.evaluationsTable, { evaluateeUid: normalizedUid }) : Promise.resolve([]),
+      normalizedEmail ? this.readTable(this.evaluationsTable, { evaluateeUid: normalizedEmail }) : Promise.resolve([]),
+      normalizedEmail ? this.readTable(this.evaluationsTable, { evaluateeUid: `email:${normalizedEmail}` }) : Promise.resolve([]),
     ]);
 
-    const evaluateeFilters = [
-      { evaluateeUid: normalizedUid },
-      { evaluateeUid: normalizedEmail },
-      { evaluateeUid: `email:${normalizedEmail}` },
-    ];
-
     const uniqueRows = new Map<string, Row>();
-    for (const filter of evaluateeFilters) {
-      const rows = await this.readTable(this.evaluationsTable, filter);
-      for (const row of rows) {
-        const key = this.str(row._id) || `${this.str(row.cycleId)}-${this.str(row.evaluateeUid)}`;
-        uniqueRows.set(key, row);
-      }
+    for (const row of [...byUid, ...byEmail, ...byEmailPrefixed]) {
+      const key = this.str(row._id) || `${this.str(row.cycleId)}-${this.str(row.evaluateeUid)}`;
+      uniqueRows.set(key, row);
     }
 
-    if (uniqueRows.size === 0) {
-      return [];
-    }
+    console.log('[DASHBOARD:GET_RESULTS]', `Total unique rows: ${uniqueRows.size}`);
+    if (uniqueRows.size === 0) return [];
 
-    const cycleIds = [...new Set([...uniqueRows.values()].map((row) => this.str(row.cycleId)).filter(Boolean))];
-    const cycleInfoById = new Map<string, { title: string; rubrics: string[]; categoryId: string; categoryName: string; groupId: string }>();
+    const cycleIds = [...new Set(
+      [...uniqueRows.values()].map((r) => this.str(r.cycleId)).filter(Boolean)
+    )];
 
-    for (const cycleId of cycleIds) {
-      const rows = await this.readTable(this.evaluationCyclesTable, { _id: cycleId });
-      if (rows.length > 0) {
-        const row = rows[0];
-        cycleInfoById.set(cycleId, {
-          title: this.str(row.title) || 'Evaluación',
-          rubrics: this.parseRubrics(row),
-          categoryId: this.str(row.categoryId),
+    
+    const cycleResults = await Promise.all(
+      cycleIds.map((id) => this.readTable(this.evaluationCyclesTable, { _id: id }))
+    );
+
+    const cycleInfoById = new Map<string, {
+      title: string; rubrics: string[]; categoryName: string; groupId: string;
+    }>();
+    cycleIds.forEach((id, i) => {
+      const row = cycleResults[i]?.[0];
+      if (row) {
+        cycleInfoById.set(id, {
+          title:        this.str(row.title) || 'Evaluación',
+          rubrics:      this.parseRubrics(row),
           categoryName: this.str(row.categoryName),
-          groupId: this.str(row.groupId),
+          groupId:      this.str(row.groupId),
         });
       }
-    }
+    });
 
     const groupedByCycle = new Map<string, Row[]>();
     for (const row of uniqueRows.values()) {
@@ -163,46 +167,44 @@ export class DashboardRemoteDatasource {
       groupedByCycle.set(cycleId, list);
     }
 
-    const result: EvaluationResult[] = [];
-    for (const [cycleId, rows] of groupedByCycle.entries()) {
-      const cycleInfo = cycleInfoById.get(cycleId);
-      const cycle = cycleInfo ?? { title: 'Evaluación', rubrics: [] as string[], categoryId: '', categoryName: '', groupId: '' };
+    const entries = [...groupedByCycle.entries()];
+    const resultItems = await Promise.all(entries.map(async ([cycleId, rows]) => {
+      const cycle = cycleInfoById.get(cycleId) ?? {
+        title: 'Evaluación', rubrics: [] as string[], categoryName: '', groupId: '',
+      };
+
       const evaluateeUid = this.str(rows[0]?.evaluateeUid);
-      const userRows = await this.readTable(this.usersTable, { uid: evaluateeUid });
-      const fallbackStudentName = userRows.length > 0 ? this.str(userRows[0].name) : evaluateeUid;
+      const groupId = this.str(rows[0]?.evaluateeGroupIdAtEval)
+                  || this.str(rows[0]?.evaluatorGroupIdAtEval)
+                  || cycle.groupId;
 
-      const groupId = this.str(rows[0]?.evaluateeGroupIdAtEval) || this.str(rows[0]?.evaluatorGroupIdAtEval) || cycle.groupId;
-      let groupName = '';
-      if (groupId) {
-        const groupRows = await this.readTable(this.groupsTable, { _id: groupId });
-        if (groupRows.length > 0) {
-          groupName = this.str(groupRows[0].displayName) || this.str(groupRows[0].name) || this.str(groupRows[0].groupName);
-        }
-      }
+      const [userRows, groupRows] = await Promise.all([
+        evaluateeUid ? this.readTable(this.usersTable, { uid: evaluateeUid }) : Promise.resolve([]),
+        groupId      ? this.readTable(this.groupsTable, { _id: groupId })     : Promise.resolve([]),
+      ]);
 
-      const studentId = '';
+      const fallbackName = userRows[0] ? this.str(userRows[0].name) : evaluateeUid;
+      const groupName    = groupRows[0]
+        ? this.str(groupRows[0].displayName) || this.str(groupRows[0].name) || this.str(groupRows[0].groupName)
+        : '';
+
       const rubricScores: Record<string, number> = {};
       const comments: string[] = [];
       let totalEvaluators = 0;
 
       for (const row of rows) {
-        const resultsRaw = row.results;
-        if (!resultsRaw) continue;
+        if (!row.results) continue;
         try {
-          const results = typeof resultsRaw === 'string' ? JSON.parse(resultsRaw) : (resultsRaw as Row);
-          const scores = Array.isArray(results.scores) ? results.scores : [];
+          const parsed = typeof row.results === 'string' ? JSON.parse(row.results) : row.results as Row;
+          const scores: unknown[] = Array.isArray(parsed.scores) ? parsed.scores : [];
           const comment = this.str(row.comments);
-          if (comment) {
-            comments.push(comment);
-          }
-          scores.forEach((value: unknown, index: number) => {
-            const rubric = cycle.rubrics[index] ?? `Criterio ${index + 1}`;
-            rubricScores[rubric] = (rubricScores[rubric] ?? 0) + (typeof value === 'number' ? value : Number(value) || 0);
+          if (comment) comments.push(comment);
+          scores.forEach((v, i) => {
+            const rubric = cycle.rubrics[i] ?? `Criterio ${i + 1}`;
+            rubricScores[rubric] = (rubricScores[rubric] ?? 0) + (typeof v === 'number' ? v : Number(v) || 0);
           });
           totalEvaluators += 1;
-        } catch {
-          // ignore malformed record
-        }
+        } catch { /* ignorar registros malformados */ }
       }
 
       if (totalEvaluators > 0) {
@@ -211,34 +213,27 @@ export class DashboardRemoteDatasource {
         }
       }
 
-      const averageValues = Object.values(rubricScores);
-      const averageTotal = averageValues.length > 0
-        ? averageValues.reduce((sum, current) => sum + current, 0) / averageValues.length
+      const vals = Object.values(rubricScores);
+      const averageTotal = vals.length > 0
+        ? vals.reduce((s, v) => s + v, 0) / vals.length
         : 0;
 
-      result.push({
+      return {
         id: `${cycleId}_${evaluateeUid}`,
         cycleId,
-        cycleTitle: cycle.title,
-        evaluatee: {
-          uid: evaluateeUid,
-          name: fallbackStudentName,
-          email: normalizedEmail,
-          studentId,
-        },
-        categoryName: cycle.categoryName,
+        cycleTitle:     cycle.title,
+        evaluatee:      { uid: evaluateeUid, name: fallbackName, email: normalizedEmail, studentId: '' },
+        categoryName:   cycle.categoryName,
         groupName,
         rubricScores,
         averageTotal,
         comments,
         totalEvaluators,
-      });
-    }
+      } satisfies EvaluationResult;
+    }));
 
-    result.sort((a, b) => b.averageTotal - a.averageTotal);
-    return result;
+    return resultItems.sort((a, b) => b.averageTotal - a.averageTotal);
   }
-
   async getResultsForTeacher(cycleId: string) {
     const cycleRows = await this.readTable(this.evaluationCyclesTable, { _id: cycleId });
     const title = cycleRows.length > 0 ? this.str(cycleRows[0].title) : 'Evaluación';

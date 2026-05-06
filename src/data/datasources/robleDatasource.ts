@@ -383,10 +383,16 @@ export class RobleDatasource {
       this._log('INSERT_TABLE', `Inserting ${records.length} records into ${tableName}`);
       const response = await this.client.post(url, { tableName, records });
 
+      this._log('INSERT_TABLE', `Response status: ${response.status}`);
+      this._log('INSERT_TABLE', `Response data: ${JSON.stringify(response.data)}`);
+
+      // If status is 200 or 201, the insert was successful
       if (response.status === 200 || response.status === 201) {
-        const data = response.data as RobleListResponse;
-        return (data.inserted?.length || 0) > 0;
+        this._log('INSERT_TABLE', `Success: HTTP ${response.status}`);
+        return true;
       }
+      
+      this._log('INSERT_TABLE', `Failed: HTTP ${response.status}`);
       return false;
     } catch (error) {
       this._log('INSERT_TABLE', `Error inserting into ${tableName}: ${error}`);
