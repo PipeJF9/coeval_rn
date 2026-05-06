@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
-import { teacherUseCases } from '../../di/container';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { academicUseCases, teacherUseCases } from '../../di/container';
 import { TeacherCourseOverview, EvaluationCycleData } from '../../domain/entities/academic';
+import { useAuth } from './AuthContext';
 
 interface TeacherContextType {
   // State
@@ -18,21 +19,22 @@ interface TeacherContextType {
   selectCourse(course: TeacherCourseOverview): void;
   deselectCourse(): void;
   uploadCsv(courseId: string, categoryName: string, csvContent: string, uploadedBy: string): Promise<boolean>;
-  loadEvaluationCycles(groupId: string): Promise<void>;
+  loadEvaluationCycles(courseId: string): Promise<void>;
   createEvaluationCycle(input: {
     courseId: string;
-    groupId: string;
+    categoryId: string;
     title: string;
     openedBy: string;
     rubrics: string[];
     closesAt?: string | null;
-  }): Promise<EvaluationCycleData | null>;
+  }): Promise<EvaluationCycleData[]>;
   clearState(): void;
 }
 
 const TeacherContext = createContext<TeacherContextType | undefined>(undefined);
 
 export function TeacherProvider({ children }: { children: React.ReactNode }) {
+  const { user, isAuthenticated } = useAuth();
   const [courses, setCourses] = useState<TeacherCourseOverview[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<TeacherCourseOverview | null>(null);
   const [isLoadingCourses, setIsLoadingCourses] = useState(false);
@@ -43,6 +45,23 @@ export function TeacherProvider({ children }: { children: React.ReactNode }) {
     status: 'success' | 'error' | 'loading';
   } | null>(null);
   const [evaluationCycles, setEvaluationCycles] = useState<EvaluationCycleData[]>([]);
+
+  useEffect(() => {
+    if (!isAuthenticated || user?.role !== 'teacher') {
+      setCourses([]);
+      setSelectedCourse(null);
+      setEvaluationCycles([]);
+      setSyncProgress(null);
+      setIsLoadingCourses(false);
+      setIsCreatingCourse(false);
+      setIsSyncingCsv(false);
+      return;
+    }
+
+    if (user?.uid) {
+      void loadCourses(user.uid);
+    }
+  }, [isAuthenticated, user?.role, user?.uid]);
 
   const loadCourses = useCallback(
     async (teacherUid: string) => {
@@ -100,7 +119,7 @@ export function TeacherProvider({ children }: { children: React.ReactNode }) {
       setSyncProgress({ message: 'Subiendo y procesando CSV...', status: 'loading' });
 
       try {
-        const result = await teacherUseCases.syncCsv.execute({
+        const result = await academicUseCases.syncCategoryFromCsv.execute({
           courseId,
           categoryName,
           csvContent,
@@ -134,9 +153,9 @@ export function TeacherProvider({ children }: { children: React.ReactNode }) {
   );
 
   const loadEvaluationCycles = useCallback(
-    async (groupId: string) => {
+    async (courseId: string) => {
       try {
-        const cycles = await teacherUseCases.getEvaluationCycles.execute(groupId);
+        const cycles = await teacherUseCases.getEvaluationCycles.execute(courseId);
         setEvaluationCycles(cycles);
       } catch (error) {
         console.error('[TEACHER] Error loading evaluation cycles:', error);
@@ -149,7 +168,7 @@ export function TeacherProvider({ children }: { children: React.ReactNode }) {
   const createEvaluationCycle = useCallback(
     async (input: {
       courseId: string;
-      groupId: string;
+      categoryId: string;
       title: string;
       openedBy: string;
       rubrics: string[];
@@ -157,13 +176,13 @@ export function TeacherProvider({ children }: { children: React.ReactNode }) {
     }) => {
       try {
         const cycle = await teacherUseCases.createEvaluationCycle.execute(input);
-        if (cycle) {
-          setEvaluationCycles([...evaluationCycles, cycle]);
+        if (cycle.length > 0) {
+          setEvaluationCycles((current) => [...current, ...cycle]);
         }
         return cycle;
       } catch (error) {
         console.error('[TEACHER] Error creating evaluation cycle:', error);
-        return null;
+        return [];
       }
     },
     [teacherUseCases, evaluationCycles]

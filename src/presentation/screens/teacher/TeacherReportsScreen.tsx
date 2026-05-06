@@ -14,7 +14,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTeacher } from '../../contexts/TeacherContext';
 
 export const TeacherReportsScreen = ({ route, navigation }: any) => {
-  const { courseId } = route.params;
+  const courseId = route?.params?.courseId ?? '';
   const { selectedCourse, isLoadingCourses } = useTeacher();
   const [reportData, setReportData] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -29,11 +29,11 @@ export const TeacherReportsScreen = ({ route, navigation }: any) => {
       // TODO: Call TeacherContext method to fetch reports
       // For now, placeholder structure
       setReportData({
-        courseName: selectedCourse?.name || 'Curso',
+        courseName: selectedCourse?.name ?? 'Curso',
         totalEvaluations: 0,
         pendingEvaluations: 0,
         submittedEvaluations: 0,
-        categories: [],
+        categories: selectedCourse?.categories ?? [],
       });
     } catch (error) {
       Alert.alert('Error', 'No se pudieron cargar los reportes');
@@ -95,22 +95,17 @@ export const TeacherReportsScreen = ({ route, navigation }: any) => {
   const renderCategoryItem = ({ item }: any) => (
     <TouchableOpacity
       style={styles.categoryCard}
-      onPress={() =>
-        navigation.navigate('CategoryReportsScreen', {
-          categoryId: item.id,
-          categoryName: item.name,
-        })
-      }
+      onPress={() => Alert.alert('Reportes', 'El detalle por categoría se implementará en el siguiente paso.')}
     >
       <View>
-        <Text style={styles.categoryName}>{item.name}</Text>
+        <Text style={styles.categoryName}>{item?.name ?? 'Categoría'}</Text>
         <Text style={styles.categoryStats}>
-          {item.groups} grupos • {item.students} estudiantes
+          {item?.groups?.length ?? item?.groups ?? 0} grupos • {item?.students ?? 0} estudiantes
         </Text>
       </View>
       <View style={styles.categoryScore}>
         <Text style={styles.scoreText}>
-          {item.averageScore ? item.averageScore.toFixed(1) : 'N/A'}
+          {item?.averageScore ? item.averageScore.toFixed(1) : 'N/A'}
         </Text>
         <Text style={styles.scoreLabel}>/ 5.0</Text>
       </View>

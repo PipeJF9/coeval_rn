@@ -39,7 +39,7 @@ export class TeacherRemoteDataSource {
     console.log(`[TEACHER:${tag}] ${message}`);
   }
 
-  private async readTable(tableName: string, filters?: Record<string, string | number | boolean | null | undefined>) {
+  private async readTable(tableName: string, filters?: Record<string, string | number | boolean>) {
     this._log(`readTable(${tableName})`, JSON.stringify(filters));
     const result = await this.robleDatasource.readTable(tableName, filters);
     this._log(`readTable(${tableName}) result`, `${result.length} rows`);
@@ -54,16 +54,25 @@ export class TeacherRemoteDataSource {
     return this.robleDatasource.updateRecord(tableName, where, set);
   }
 
-  private async deleteRecords(tableName: string, where: Row): Promise<boolean> {
-    // ROBLE uses POST to /delete with {tableName, where} payload
-    const url = `${this.robleDatasource.databaseUrl}/${this.robleDatasource.dbName}/delete`;
-    try {
-      const response = await this.robleDatasource.client.post(url, { tableName, where });
-      return response.status === 200 || response.status === 201;
-    } catch (error) {
-      this._log('DELETE', `Error deleting from ${tableName}: ${error}`);
-      return false;
-    }
+  private async getCategoryById(courseId: string, categoryId: string): Promise<Row | null> {
+    const rows = await this.readTable(this.categoriesTable, {
+      _id: categoryId,
+      courseId,
+    });
+
+    return rows.length > 0 ? rows[0] : null;
+  }
+
+  private async getGroupsByCategory(courseId: string, categoryId: string): Promise<Row[]> {
+    return this.readTable(this.groupsTable, {
+      courseId,
+      categoryId,
+    });
+  }
+
+  private async findOne(tableName: string, filters: Record<string, string | number | boolean>): Promise<Row | null> {
+    const rows = await this.readTable(tableName, filters);
+    return rows.length > 0 ? rows[0] : null;
   }
 
   private normalizeCategoryString(raw: string): string {
@@ -150,7 +159,24 @@ export class TeacherRemoteDataSource {
       createdAt: new Date().toISOString(),
     });
 
-    return inserted ? this.str(inserted._id) : null;
+    if (!inserted) {
+      return null;
+    }
+
+    const created = await this.findOne(this.categoriesTable, {
+      courseId,
+      name: categoryName,
+    });
+
+    return created ? this.str(created._id) : null;
+  }
+
+  private async ensureCategoryById(courseId: string, categoryId: string): Promise<Row | null> {
+    if (!categoryId.trim()) {
+      return null;
+    }
+
+    return this.getCategoryById(courseId, categoryId);
   }
 
   private async ensureGroup(
@@ -213,7 +239,23 @@ export class TeacherRemoteDataSource {
     for (const payload of payloads) {
       const inserted = await this.insertRecord(this.groupsTable, payload);
       if (inserted) {
-        return this.str(inserted._id);
+        const created = await this.findOne(this.groupsTable, {
+          courseId,
+          categoryId,
+          groupName,
+        }) ?? await this.findOne(this.groupsTable, {
+          courseId,
+          categoryId,
+          name: displayName,
+        }) ?? await this.findOne(this.groupsTable, {
+          courseId,
+          categoryId,
+          name: groupName,
+        });
+
+        if (created) {
+          return this.str(created._id);
+        }
       }
     }
 
@@ -291,11 +333,20 @@ export class TeacherRemoteDataSource {
 
     if (!inserted) return null;
 
+    const created = await this.findOne(this.coursesTable, {
+      createdBy: input.teacherUid,
+      name: input.name,
+      nrc: input.nrc,
+      term: input.term,
+    });
+
+    if (!created) return null;
+
     return {
-      id: this.str(inserted._id),
-      name: this.str(inserted.name),
-      nrc: this.str(inserted.nrc),
-      term: this.str(inserted.term),
+      id: this.str(created._id),
+      name: this.str(created.name),
+      nrc: this.str(created.nrc),
+      term: this.str(created.term),
       categoriesCount: 0,
       groupsCount: 0,
       activeStudentsCount: 0,
@@ -464,7 +515,15 @@ export class TeacherRemoteDataSource {
       status: 'processing',
     });
 
-    const importId = importInserted ? this.str(importInserted._id) : '';
+    const importRecord = importInserted
+      ? await this.findOne(this.importsTable, {
+          courseId: input.courseId,
+          categoryId,
+          fileHash,
+          status: 'processing',
+        })
+      : null;
+    const importId = importRecord ? this.str(importRecord._id) : '';
     let createdGroups = 0;
     let activatedEnrollments = 0;
     let closedEnrollments = 0;
@@ -565,11 +624,15 @@ export class TeacherRemoteDataSource {
 
     // Mark import as completed
     if (importId) {
-      await this.updateRecord(
-        this.importsTable,
-        { _id: importId },
-        { status: 'completed' }
-      );
+      try {
+        await this.updateRecord(
+          this.importsTable,
+          { _id: importId },
+          { status: 'completed' }
+        );
+      } catch (error) {
+        this._log('SYNC', `No se pudo marcar csv_imports como completado: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
 
     return {
@@ -580,9 +643,29 @@ export class TeacherRemoteDataSource {
     };
   }
 
-  async getEvaluationCyclesByGroup(groupId: string): Promise<EvaluationCycleData[]> {
-    const rows = await this.readTable(this.evaluationCyclesTable, { groupId });
+  async getEvaluationCyclesByCourse(courseId: string): Promise<EvaluationCycleData[]> {
+    const rows = await this.readTable(this.evaluationCyclesTable, { courseId });
     return rows.map((row) => this.mapEvaluationCycle(row));
+  }
+
+  async getEvaluationCyclesByCategory(courseId: string, categoryId: string): Promise<EvaluationCycleData[]> {
+    const groups = await this.getGroupsByCategory(courseId, categoryId);
+    const groupIds = [...new Set(groups.map((group) => this.str(group._id)).filter(Boolean))];
+    const cycles: EvaluationCycleData[] = [];
+    const seen = new Set<string>();
+
+    for (const groupId of groupIds) {
+      const rows = await this.readTable(this.evaluationCyclesTable, { courseId, groupId });
+      for (const row of rows) {
+        const cycle = this.mapEvaluationCycle(row);
+        if (cycle.id && !seen.has(cycle.id)) {
+          seen.add(cycle.id);
+          cycles.push(cycle);
+        }
+      }
+    }
+
+    return cycles;
   }
 
   private mapEvaluationCycle(row: Row): EvaluationCycleData {
@@ -614,17 +697,28 @@ export class TeacherRemoteDataSource {
 
   async createEvaluationCycle(input: {
     courseId: string;
-    groupId: string;
+    categoryId: string;
     title: string;
     openedBy: string;
     rubrics: string[];
     closesAt?: string | null;
   }): Promise<EvaluationCycleData | null> {
-    const now = new Date().toISOString();
+    const category = await this.ensureCategoryById(input.courseId, input.categoryId);
+    if (!category) {
+      throw new Error('Categoría no encontrada');
+    }
 
+    const groups = await this.getGroupsByCategory(input.courseId, input.categoryId);
+    if (groups.length === 0) {
+      throw new Error('La categoría no tiene grupos asociados');
+    }
+
+    const now = new Date().toISOString();
+    const firstGroup = groups[0];
     const inserted = await this.insertRecord(this.evaluationCyclesTable, {
       courseId: input.courseId,
-      groupId: input.groupId,
+      groupId: this.str(firstGroup?._id),
+      categoryId: input.categoryId,
       title: input.title,
       openedBy: input.openedBy,
       openedAt: now,
@@ -635,11 +729,63 @@ export class TeacherRemoteDataSource {
 
     if (!inserted) return null;
 
-    return this.mapEvaluationCycle(inserted);
+    const created = await this.findOne(this.evaluationCyclesTable, {
+      courseId: input.courseId,
+      groupId: this.str(firstGroup?._id),
+      title: input.title,
+      openedBy: input.openedBy,
+    });
+
+    return created ? this.mapEvaluationCycle(created) : null;
   }
 
-  // Access to robleDatasource for use in AcademicRemoteDatasource
-  get client() {
-    return this.robleDatasource.client;
+  async createEvaluationCyclesForCategory(input: {
+    courseId: string;
+    categoryId: string;
+    title: string;
+    openedBy: string;
+    rubrics: string[];
+    closesAt?: string | null;
+  }): Promise<EvaluationCycleData[]> {
+    const category = await this.ensureCategoryById(input.courseId, input.categoryId);
+    if (!category) {
+      throw new Error('Categoría no encontrada');
+    }
+
+    const groups = await this.getGroupsByCategory(input.courseId, input.categoryId);
+    if (groups.length === 0) {
+      throw new Error('La categoría no tiene grupos asociados');
+    }
+
+    const createdCycles: EvaluationCycleData[] = [];
+    for (const group of groups) {
+      const inserted = await this.insertRecord(this.evaluationCyclesTable, {
+        courseId: input.courseId,
+        groupId: this.str(group._id),
+        categoryId: input.categoryId,
+        title: input.title,
+        openedBy: input.openedBy,
+        openedAt: new Date().toISOString(),
+        closeAt: input.closesAt ?? null,
+        status: 'open',
+        criteria: { rubrics: input.rubrics },
+      });
+
+      if (inserted) {
+        const created = await this.findOne(this.evaluationCyclesTable, {
+          courseId: input.courseId,
+          groupId: this.str(group._id),
+          title: input.title,
+          openedBy: input.openedBy,
+        });
+
+        if (created) {
+          createdCycles.push(this.mapEvaluationCycle(created));
+        }
+      }
+    }
+
+    return createdCycles;
   }
+
 }

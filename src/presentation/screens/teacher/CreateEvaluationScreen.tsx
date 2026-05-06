@@ -1,384 +1,359 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Alert,
-  ActivityIndicator,
-  Modal,
-  TextInput,
-  FlatList,
-  ScrollView,
-} from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useTeacher } from '../../contexts/TeacherContext';
-import { useAuth } from '../../contexts/AuthContext';
 
-export const CreateEvaluationScreen = ({ route, navigation }: any) => {
+import { colors, radius, spacing } from '../../../core/theme';
+import { CategoryOverview, TeacherCourseOverview } from '../../../domain/entities/academic';
+import { AppTextInput } from '../../components/AppTextInput';
+import { PrimaryButton } from '../../components/PrimaryButton';
+import { SectionHeader } from '../../components/SectionHeader';
+import { SurfaceCard } from '../../components/SurfaceCard';
+import { useAuth } from '../../contexts/AuthContext';
+import { useTeacher } from '../../contexts/TeacherContext';
+
+export function CreateEvaluationScreen({ route, navigation }: any) {
   const courseId = route?.params?.courseId;
   const { user } = useAuth();
-  const { selectedCourse, createEvaluationCycle } = useTeacher();
+  const { courses, selectedCourse, createEvaluationCycle } = useTeacher();
 
-  const [selectedCategory, setSelectedCategory] = useState<any>(null);
-  const [selectedGroup, setSelectedGroup] = useState<any>(null);
-  const [showGroupModal, setShowGroupModal] = useState(false);
+  const course = useMemo<TeacherCourseOverview | undefined>(() => {
+    if (selectedCourse?.id === courseId) {
+      return selectedCourse ?? undefined;
+    }
+
+    return courses.find((item) => item.id === courseId) ?? selectedCourse ?? courses[0] ?? undefined;
+  }, [courseId, courses, selectedCourse]);
+
+  const [selectedCategory, setSelectedCategory] = useState<CategoryOverview | null>(null);
   const [title, setTitle] = useState('');
   const [rubrics, setRubrics] = useState<string[]>(['Dimensión 1', 'Dimensión 2', 'Dimensión 3']);
   const [newRubric, setNewRubric] = useState('');
   const [isCreating, setIsCreating] = useState(false);
 
-  const handleAddRubric = () => {
-    if (newRubric.trim()) {
-      setRubrics([...rubrics, newRubric.trim()]);
-      setNewRubric('');
-    }
-  };
-
-  const handleRemoveRubric = (index: number) => {
-    setRubrics(rubrics.filter((_, i: number) => i !== index));
-  };
-
-  const handleCreateCycle = async () => {
-    if (!title.trim()) {
-      Alert.alert('Error', 'Por favor ingresa un título');
+  useEffect(() => {
+    if (!course?.categories.length) {
+      setSelectedCategory(null);
       return;
     }
 
-    if (!selectedGroup) {
-      Alert.alert('Error', 'Por favor selecciona un grupo');
+    setSelectedCategory((current) => {
+      if (current && course.categories.some((category) => category.id === current.id)) {
+        return current;
+      }
+
+      return course.categories[0] ?? null;
+    });
+  }, [course?.id, course?.categories]);
+
+  const handleAddRubric = () => {
+    const nextRubric = newRubric.trim();
+    if (!nextRubric) {
+      return;
+    }
+
+    setRubrics((current) => [...current, nextRubric]);
+    setNewRubric('');
+  };
+
+  const handleRemoveRubric = (index: number) => {
+    setRubrics((current) => current.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  const handleCreateCycle = async () => {
+    if (!course) {
+      Alert.alert('Curso no disponible', 'Selecciona un curso válido.');
+      return;
+    }
+
+    if (!selectedCategory) {
+      Alert.alert('Falta categoría', 'Selecciona una categoría para lanzar el examen.');
+      return;
+    }
+
+    if (!title.trim()) {
+      Alert.alert('Falta título', 'Ingresa un título para el ciclo.');
       return;
     }
 
     if (rubrics.length === 0) {
-      Alert.alert('Error', 'Al menos un rubric es requerido');
+      Alert.alert('Faltan dimensiones', 'Agrega al menos una dimensión de evaluación.');
       return;
     }
 
     if (!user?.uid) {
-      Alert.alert('Error', 'Usuario no identificado');
+      Alert.alert('Sesión inválida', 'No se pudo identificar al profesor.');
       return;
     }
 
     setIsCreating(true);
     try {
-      const cycle = await createEvaluationCycle({
-        courseId,
-        groupId: selectedGroup.id,
-        title,
+      const cycles = await createEvaluationCycle({
+        courseId: course.id,
+        categoryId: selectedCategory.id,
+        title: title.trim(),
         openedBy: user.uid,
         rubrics,
       });
 
-      if (cycle) {
-        Alert.alert('Éxito', 'Ciclo de evaluación creado');
-        navigation.goBack();
-      } else {
-        Alert.alert('Error', 'No se pudo crear el ciclo');
+      if (cycles.length === 0) {
+        Alert.alert('Error', 'No se pudo crear el ciclo.');
+        return;
       }
+
+      Alert.alert(
+        'Éxito',
+        `Se lanzó el examen en ${cycles.length} grupo${cycles.length === 1 ? '' : 's'} de la categoría ${selectedCategory.name}.`
+      );
+      navigation.goBack();
     } catch (error) {
-      Alert.alert('Error', 'Error al crear el ciclo');
+      Alert.alert('Error', 'No se pudo crear el ciclo de evaluación.');
     } finally {
       setIsCreating(false);
     }
   };
 
-  const groups = selectedCategory?.groups || [];
+  if (!course) {
+    return (
+      <View style={styles.fallback}>
+        <MaterialCommunityIcons name="alert-circle-outline" size={40} color={colors.textMuted} />
+        <Text style={styles.fallbackTitle}>Curso no encontrado</Text>
+      </View>
+    );
+  }
 
   return (
-    <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Step 1: Select Category */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>1. Selecciona Categoría</Text>
+    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+      <SurfaceCard>
+        <Text style={styles.courseLabel}>Curso seleccionado</Text>
+        <Text style={styles.courseTitle}>{course.name}</Text>
+        <Text style={styles.courseMeta}>NRC {course.nrc} · {course.term}</Text>
+      </SurfaceCard>
 
-          {selectedCourse && selectedCourse.categories.length > 0 ? (
-            <View style={styles.optionsList}>
-              {selectedCourse.categories.map((category) => (
-                <TouchableOpacity
+      <View style={{ height: spacing.lg }} />
+
+      <SurfaceCard>
+        <SectionHeader
+          title="1. Selecciona categoría"
+          subtitle="El examen se creará para todos los grupos que pertenezcan a esta categoría."
+        />
+
+        {course.categories.length === 0 ? (
+          <Text style={styles.emptyText}>No hay categorías disponibles todavía.</Text>
+        ) : (
+          <View style={styles.optionsList}>
+            {course.categories.map((category) => {
+              const isSelected = selectedCategory?.id === category.id;
+
+              return (
+                <Pressable
                   key={category.id}
-                  style={[
-                    styles.optionButton,
-                    selectedCategory?.id === category.id && styles.optionButtonActive,
-                  ]}
-                  onPress={() => {
-                    setSelectedCategory(category);
-                    setSelectedGroup(null);
-                  }}
+                  style={[styles.optionButton, isSelected && styles.optionButtonActive]}
+                  onPress={() => setSelectedCategory(category)}
                 >
                   <MaterialCommunityIcons
-                    name="folder"
+                    name="folder-outline"
                     size={20}
-                    color={selectedCategory?.id === category.id ? '#0066cc' : '#666'}
+                    color={isSelected ? colors.primary : colors.textMuted}
                   />
-                  <Text
-                    style={[
-                      styles.optionText,
-                      selectedCategory?.id === category.id && styles.optionTextActive,
-                    ]}
-                  >
-                    {category.name} ({category.groups.length} grupos)
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ) : (
-            <Text style={styles.emptyText}>No hay categorías disponibles</Text>
-          )}
-        </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.optionText, isSelected && styles.optionTextActive]}>{category.name}</Text>
+                    <Text style={styles.optionSubtext}>{category.groups.length} grupos · {category.activeStudentsCount} estudiantes</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      </SurfaceCard>
 
-        {/* Step 2: Select Group */}
-        {selectedCategory && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>2. Selecciona Grupo</Text>
+      <View style={{ height: spacing.lg }} />
 
-            {groups.length > 0 ? (
-              <View style={styles.optionsList}>
-                {groups.map((group: any) => (
-                  <TouchableOpacity
-                    key={group.id}
-                    style={[
-                      styles.optionButton,
-                      selectedGroup?.id === group.id && styles.optionButtonActive,
-                    ]}
-                    onPress={() => setSelectedGroup(group)}
-                  >
-                    <MaterialCommunityIcons
-                      name="account-multiple"
-                      size={20}
-                      color={selectedGroup?.id === group.id ? '#0066cc' : '#666'}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={[
-                          styles.optionText,
-                          selectedGroup?.id === group.id && styles.optionTextActive,
-                        ]}
-                      >
-                        {group.name}
-                      </Text>
-                      <Text style={styles.optionSubtext}>
-                        {group.code} • {group.activeStudentsCount} estudiantes
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
+      {selectedCategory ? (
+        <SurfaceCard>
+          <SectionHeader title="2. Define el ciclo" subtitle="Personaliza el nombre y las dimensiones de evaluación." />
+
+          <AppTextInput
+            label="Título del ciclo"
+            value={title}
+            onChangeText={setTitle}
+            placeholder="Ej: Evaluación de presentaciones"
+            editable={!isCreating}
+          />
+
+          <View style={{ height: spacing.lg }} />
+
+          <Text style={styles.subsectionTitle}>Dimensiones</Text>
+          <View style={styles.rubricList}>
+            {rubrics.map((rubric, index) => (
+              <View key={`${rubric}-${index}`} style={styles.rubricItem}>
+                <MaterialCommunityIcons name="drag-vertical" size={18} color={colors.textMuted} />
+                <Text style={styles.rubricText}>{rubric}</Text>
+                <Pressable onPress={() => handleRemoveRubric(index)} disabled={isCreating} hitSlop={8}>
+                  <MaterialCommunityIcons name="close" size={20} color={colors.danger} />
+                </Pressable>
               </View>
-            ) : (
-              <Text style={styles.emptyText}>No hay grupos en esta categoría</Text>
-            )}
+            ))}
           </View>
-        )}
 
-        {/* Step 3: Enter Title */}
-        {selectedGroup && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>3. Título del Ciclo</Text>
-
-            <TextInput
-              style={styles.input}
-              placeholder="Ej: Evaluación de Presentaciones"
-              value={title}
-              onChangeText={setTitle}
-              editable={!isCreating}
-            />
-          </View>
-        )}
-
-        {/* Step 4: Define Rubrics */}
-        {selectedGroup && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>4. Dimensiones de Evaluación</Text>
-
-            <View style={styles.rubricsList}>
-              {rubrics.map((rubric: string, index: number) => (
-                <View key={index} style={styles.rubricItem}>
-                  <MaterialCommunityIcons
-                    name="drag-vertical"
-                    size={16}
-                    color="#999"
-                    style={styles.dragHandle}
-                  />
-                  <Text style={styles.rubricText}>{rubric}</Text>
-                  <TouchableOpacity
-                    onPress={() => handleRemoveRubric(index)}
-                    disabled={isCreating}
-                  >
-                    <MaterialCommunityIcons
-                      name="close"
-                      size={20}
-                      color="#dc3545"
-                    />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-
-            <View style={styles.addRubricBox}>
-              <TextInput
-                style={styles.rubricInput}
-                placeholder="Nueva dimensión..."
+          <View style={styles.addRow}>
+            <View style={{ flex: 1 }}>
+              <AppTextInput
+                label="Nueva dimensión"
                 value={newRubric}
                 onChangeText={setNewRubric}
+                placeholder="Ej: Claridad, argumentación, evidencia"
                 editable={!isCreating}
               />
-              <TouchableOpacity
-                style={styles.addRubricButton}
-                onPress={handleAddRubric}
-                disabled={isCreating || !newRubric.trim()}
-              >
-                <MaterialCommunityIcons name="plus" size={20} color="#0066cc" />
-              </TouchableOpacity>
             </View>
+            <Pressable style={styles.addButton} onPress={handleAddRubric} disabled={isCreating || !newRubric.trim()}>
+              <MaterialCommunityIcons name="plus" size={20} color={colors.primary} />
+            </Pressable>
           </View>
-        )}
 
-        {/* Create Button */}
-        {selectedGroup && (
-          <View style={styles.section}>
-            <TouchableOpacity
-              style={[styles.createButton, isCreating && styles.buttonDisabled]}
-              onPress={handleCreateCycle}
-              disabled={isCreating}
-            >
-              {isCreating ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <MaterialCommunityIcons name="check" size={20} color="#fff" />
-                  <Text style={styles.createButtonText}>Crear Ciclo</Text>
-                </>
-              )}
-            </TouchableOpacity>
+          <View style={styles.summaryBox}>
+            <Text style={styles.summaryTitle}>Alcance del lanzamiento</Text>
+            <Text style={styles.summaryText}>
+              Se lanzará a {selectedCategory.groups.length} grupo{selectedCategory.groups.length === 1 ? '' : 's'} de la categoría {selectedCategory.name}.
+            </Text>
           </View>
-        )}
-      </ScrollView>
-    </View>
+
+          <View style={{ height: spacing.lg }} />
+          <PrimaryButton title="Lanzar examen" onPress={handleCreateCycle} loading={isCreating} />
+        </SurfaceCard>
+      ) : null}
+    </ScrollView>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: colors.background,
   },
-  section: {
-    padding: 16,
-    backgroundColor: '#fff',
-    marginVertical: 8,
+  content: {
+    padding: spacing.lg,
+    paddingBottom: 36,
   },
-  sectionTitle: {
-    fontSize: 16,
+  courseLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
     fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 12,
+  },
+  courseTitle: {
+    marginTop: spacing.xs,
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  courseMeta: {
+    marginTop: 4,
+    color: colors.textMuted,
+    fontSize: 13,
+  },
+  emptyText: {
+    color: colors.textMuted,
+    fontSize: 13,
   },
   optionsList: {
-    gap: 8,
+    gap: spacing.sm,
   },
   optionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    gap: 12,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   optionButtonActive: {
-    borderColor: '#0066cc',
-    backgroundColor: '#e6f0ff',
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
   },
   optionText: {
+    color: colors.text,
     fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
+    fontWeight: '800',
   },
   optionTextActive: {
-    color: '#0066cc',
+    color: colors.primaryDark,
   },
   optionSubtext: {
-    fontSize: 12,
-    color: '#999',
     marginTop: 2,
+    color: colors.textMuted,
+    fontSize: 12,
   },
-  emptyText: {
-    fontSize: 14,
-    color: '#999',
-    textAlign: 'center',
-    paddingVertical: 20,
+  subsectionTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+    marginBottom: spacing.sm,
   },
-  input: {
-    backgroundColor: '#f5f5f5',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#1a1a1a',
-  },
-  rubricsList: {
-    gap: 8,
-    marginBottom: 12,
+  rubricList: {
+    gap: spacing.sm,
   },
   rubricItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 6,
-    gap: 8,
-  },
-  dragHandle: {
-    marginRight: 4,
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceMuted,
   },
   rubricText: {
     flex: 1,
+    color: colors.text,
     fontSize: 13,
-    color: '#1a1a1a',
+    fontWeight: '700',
   },
-  addRubricBox: {
+  addRow: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'flex-end',
+    gap: spacing.sm,
+    marginTop: spacing.md,
   },
-  rubricInput: {
+  addButton: {
+    width: 54,
+    height: 54,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 1,
+  },
+  summaryBox: {
+    marginTop: spacing.lg,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceMuted,
+  },
+  summaryTitle: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  summaryText: {
+    marginTop: 4,
+    color: colors.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  fallback: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 13,
-  },
-  addRubricButton: {
-    width: 40,
-    height: 40,
-    borderWidth: 1,
-    borderColor: '#0066cc',
-    borderRadius: 6,
-    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#e6f0ff',
-  },
-  createButton: {
-    backgroundColor: '#28a745',
-    paddingVertical: 12,
-    borderRadius: 8,
-    flexDirection: 'row',
     justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
+    backgroundColor: colors.background,
+    padding: spacing.xl,
   },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  createButtonText: {
-    color: '#fff',
+  fallbackTitle: {
+    marginTop: spacing.md,
+    color: colors.text,
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '800',
   },
 });

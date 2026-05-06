@@ -16,15 +16,24 @@ export interface TeacherRepository {
   }): Promise<CsvSyncResult>;
 
   // Evaluation Cycles
-  getEvaluationCyclesByGroup(groupId: string): Promise<EvaluationCycleData[]>;
+  getEvaluationCyclesByCourse(courseId: string): Promise<EvaluationCycleData[]>;
+  getEvaluationCyclesByCategory(input: { courseId: string; categoryId: string }): Promise<EvaluationCycleData[]>;
   createEvaluationCycle(input: {
     courseId: string;
-    groupId: string;
+    categoryId: string;
     title: string;
     openedBy: string;
     rubrics: string[];
     closesAt?: string | null;
   }): Promise<EvaluationCycleData | null>;
+  createEvaluationCyclesForCategory(input: {
+    courseId: string;
+    categoryId: string;
+    title: string;
+    openedBy: string;
+    rubrics: string[];
+    closesAt?: string | null;
+  }): Promise<EvaluationCycleData[]>;
 
   // Cache
   clearCache(): Promise<void>;
@@ -32,7 +41,7 @@ export interface TeacherRepository {
 
 const CACHE_KEYS = {
   TEACHER_COURSES: (teacherUid: string) => `teacher:courses:${teacherUid}`,
-  EVALUATION_CYCLES: (groupId: string) => `teacher:cycles:${groupId}`,
+  EVALUATION_CYCLES: (scope: string) => `teacher:cycles:${scope}`,
 };
 
 const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutos
@@ -144,8 +153,8 @@ export class TeacherRepositoryImpl implements TeacherRepository {
     }
   }
 
-  async getEvaluationCyclesByGroup(groupId: string): Promise<EvaluationCycleData[]> {
-    const cacheKey = CACHE_KEYS.EVALUATION_CYCLES(groupId);
+  async getEvaluationCyclesByCourse(courseId: string): Promise<EvaluationCycleData[]> {
+    const cacheKey = CACHE_KEYS.EVALUATION_CYCLES(`course:${courseId}`);
 
     const cached = await this._getCachedData<EvaluationCycleData[]>(cacheKey);
     if (cached) {
@@ -153,7 +162,7 @@ export class TeacherRepositoryImpl implements TeacherRepository {
     }
 
     try {
-      const cycles = await this.remoteDatasource.getEvaluationCyclesByGroup(groupId);
+      const cycles = await this.remoteDatasource.getEvaluationCyclesByCourse(courseId);
       await this._setCachedData(cacheKey, cycles);
       return cycles;
     } catch (error) {
@@ -162,9 +171,27 @@ export class TeacherRepositoryImpl implements TeacherRepository {
     }
   }
 
+  async getEvaluationCyclesByCategory(input: { courseId: string; categoryId: string }): Promise<EvaluationCycleData[]> {
+    const cacheKey = CACHE_KEYS.EVALUATION_CYCLES(`category:${input.courseId}:${input.categoryId}`);
+
+    const cached = await this._getCachedData<EvaluationCycleData[]>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      const cycles = await this.remoteDatasource.getEvaluationCyclesByCategory(input.courseId, input.categoryId);
+      await this._setCachedData(cacheKey, cycles);
+      return cycles;
+    } catch (error) {
+      console.error(`[TEACHER] Error fetching category cycles:`, error);
+      return [];
+    }
+  }
+
   async createEvaluationCycle(input: {
     courseId: string;
-    groupId: string;
+    categoryId: string;
     title: string;
     openedBy: string;
     rubrics: string[];
@@ -180,6 +207,26 @@ export class TeacherRepositoryImpl implements TeacherRepository {
     } catch (error) {
       console.error(`[TEACHER] Error creating evaluation cycle:`, error);
       return null;
+    }
+  }
+
+  async createEvaluationCyclesForCategory(input: {
+    courseId: string;
+    categoryId: string;
+    title: string;
+    openedBy: string;
+    rubrics: string[];
+    closesAt?: string | null;
+  }): Promise<EvaluationCycleData[]> {
+    try {
+      const cycles = await this.remoteDatasource.createEvaluationCyclesForCategory(input);
+
+      await this.clearCache();
+
+      return cycles;
+    } catch (error) {
+      console.error(`[TEACHER] Error creating category evaluation cycles:`, error);
+      return [];
     }
   }
 

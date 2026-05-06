@@ -41,7 +41,10 @@ export class AcademicCsvParser {
       normalized = normalized.split(key).join(replacement);
     }
 
-    return normalized.replace(/\s+/g, '');
+    return normalized
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, '');
   }
 
   private asString(value: unknown): string {

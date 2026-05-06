@@ -402,11 +402,19 @@ export class RobleDatasource {
     const url = `${this.databaseUrl}/${this.dbName}/update`;
     try {
       this._log('UPDATE_RECORD', `Updating ${tableName}`);
-      const response = await this.client.post(url, { tableName, where, set });
-
+      
+      // Try first payload format: { tableName, where, set }
+      let response = await this.client.post(url, { tableName, where, set });
       if (response.status === 200 || response.status === 201) {
         return true;
       }
+
+      // Try second payload format (if first fails): { tableName, filters, updates }
+      response = await this.client.post(url, { tableName, filters: where, updates: set });
+      if (response.status === 200 || response.status === 201) {
+        return true;
+      }
+
       return false;
     } catch (error) {
       this._log('UPDATE_RECORD', `Error updating ${tableName}: ${error}`);

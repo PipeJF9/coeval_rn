@@ -53,12 +53,27 @@ export class SyncCsvUseCase {
 export class GetEvaluationCyclesUseCase {
   constructor(private repository: TeacherRepository) {}
 
-  async execute(groupId: string): Promise<EvaluationCycleData[]> {
-    if (!groupId.trim()) {
-      throw new Error('El ID del grupo es requerido');
+  async execute(courseId: string): Promise<EvaluationCycleData[]> {
+    if (!courseId.trim()) {
+      throw new Error('El ID del curso es requerido');
     }
 
-    return this.repository.getEvaluationCyclesByGroup(groupId);
+    return this.repository.getEvaluationCyclesByCourse(courseId);
+  }
+}
+
+export class GetCategoryEvaluationCyclesUseCase {
+  constructor(private repository: TeacherRepository) {}
+
+  async execute(input: { courseId: string; categoryId: string }): Promise<EvaluationCycleData[]> {
+    if (!input.courseId.trim()) {
+      throw new Error('El ID del curso es requerido');
+    }
+    if (!input.categoryId.trim()) {
+      throw new Error('El ID de la categoría es requerido');
+    }
+
+    return this.repository.getEvaluationCyclesByCategory(input);
   }
 }
 
@@ -67,17 +82,17 @@ export class CreateEvaluationCycleUseCase {
 
   async execute(input: {
     courseId: string;
-    groupId: string;
+    categoryId: string;
     title: string;
     openedBy: string;
     rubrics: string[];
     closesAt?: string | null;
-  }): Promise<EvaluationCycleData | null> {
+  }): Promise<EvaluationCycleData[]> {
     if (!input.courseId.trim()) {
       throw new Error('El ID del curso es requerido');
     }
-    if (!input.groupId.trim()) {
-      throw new Error('El ID del grupo es requerido');
+    if (!input.categoryId.trim()) {
+      throw new Error('El ID de la categoría es requerido');
     }
     if (!input.title.trim()) {
       throw new Error('El título del ciclo es requerido');
@@ -86,7 +101,7 @@ export class CreateEvaluationCycleUseCase {
       throw new Error('Al menos un rubric es requerido');
     }
 
-    return this.repository.createEvaluationCycle(input);
+    return this.repository.createEvaluationCyclesForCategory(input);
   }
 }
 
@@ -96,6 +111,7 @@ export class TeacherUseCases {
   readonly createCourse: CreateCourseUseCase;
   readonly syncCsv: SyncCsvUseCase;
   readonly getEvaluationCycles: GetEvaluationCyclesUseCase;
+  readonly getCategoryEvaluationCycles: GetCategoryEvaluationCyclesUseCase;
   readonly createEvaluationCycle: CreateEvaluationCycleUseCase;
 
   constructor(repository: TeacherRepository) {
@@ -103,6 +119,7 @@ export class TeacherUseCases {
     this.createCourse = new CreateCourseUseCase(repository);
     this.syncCsv = new SyncCsvUseCase(repository);
     this.getEvaluationCycles = new GetEvaluationCyclesUseCase(repository);
+    this.getCategoryEvaluationCycles = new GetCategoryEvaluationCyclesUseCase(repository);
     this.createEvaluationCycle = new CreateEvaluationCycleUseCase(repository);
   }
 }

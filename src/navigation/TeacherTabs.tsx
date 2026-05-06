@@ -1,6 +1,7 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { Pressable } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 // Screens
@@ -12,10 +13,19 @@ import { EvaluationResponsesScreen } from '../presentation/screens/teacher/Evalu
 
 // Types
 import { colors } from '../core/theme';
+import { useAuth } from '../presentation/contexts/AuthContext';
+
+function LogoutButton({ onPress }: { onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} hitSlop={10} style={{ paddingHorizontal: 8 }}>
+      <MaterialCommunityIcons name="logout" size={22} color={colors.primary} />
+    </Pressable>
+  );
+}
 
 const TeacherCoursesStack = createNativeStackNavigator();
 
-function TeacherCoursesStackScreen() {
+function TeacherCoursesStackScreen({ logout }: { logout: () => void }) {
   return (
     <TeacherCoursesStack.Navigator
       screenOptions={{
@@ -28,6 +38,7 @@ function TeacherCoursesStackScreen() {
           fontWeight: '700',
           fontSize: 16,
         },
+        headerRight: () => <LogoutButton onPress={logout} />,
       }}
     >
       <TeacherCoursesStack.Screen
@@ -66,7 +77,7 @@ function TeacherCoursesStackScreen() {
 
 const TeacherReportsStack = createNativeStackNavigator();
 
-function TeacherReportsStackScreen() {
+function TeacherReportsStackScreen({ logout }: { logout: () => void }) {
   return (
     <TeacherReportsStack.Navigator
       screenOptions={{
@@ -79,6 +90,7 @@ function TeacherReportsStackScreen() {
           fontWeight: '700',
           fontSize: 16,
         },
+        headerRight: () => <LogoutButton onPress={logout} />,
       }}
     >
       <TeacherReportsStack.Screen
@@ -96,6 +108,8 @@ function TeacherReportsStackScreen() {
 const TeacherTabs = createBottomTabNavigator();
 
 export function TeacherTabsNavigator() {
+  const { logout } = useAuth();
+
   return (
     <TeacherTabs.Navigator
       screenOptions={({ route }: any) => ({
@@ -130,14 +144,14 @@ export function TeacherTabsNavigator() {
     >
       <TeacherTabs.Screen
         name="TeacherCoursesTab"
-        component={TeacherCoursesStackScreen}
+        children={() => <TeacherCoursesStackScreen logout={logout} />}
         options={{
           tabBarLabel: 'Cursos',
         }}
       />
       <TeacherTabs.Screen
         name="TeacherReportsTab"
-        component={TeacherReportsStackScreen}
+        children={() => <TeacherReportsStackScreen logout={logout} />}
         options={{
           tabBarLabel: 'Reportes',
         }}
