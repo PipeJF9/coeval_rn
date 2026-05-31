@@ -9,6 +9,7 @@ import { TeacherCourseDetailScreen } from '../presentation/screens/teacher/Teach
 import { CreateEvaluationScreen } from '../presentation/screens/teacher/CreateEvaluationScreen';
 import { TeacherReportsScreen } from '../presentation/screens/teacher/TeacherReportsScreen';
 import { EvaluationResponsesScreen } from '../presentation/screens/teacher/EvaluationResponsesScreen';
+import { ProfileScreen } from '../presentation/screens/student/ProfileScreen';
 
 // Types
 import { colors } from '../core/theme';
@@ -20,14 +21,9 @@ function TeacherCoursesStackScreen() {
     <TeacherCoursesStack.Navigator
       screenOptions={{
         headerShown: true,
-        headerStyle: {
-          backgroundColor: colors.background,
-        },
-        headerTintColor: colors.primary,
-        headerTitleStyle: {
-          fontWeight: '700',
-          fontSize: 16,
-        },
+        headerStyle: { backgroundColor: colors.dark },
+        headerTintColor: '#FFFFFF',
+        headerTitleStyle: { fontWeight: '700', fontSize: 16, color: '#FFFFFF' },
       }}
     >
       <TeacherCoursesStack.Screen
@@ -71,14 +67,9 @@ function TeacherReportsStackScreen() {
     <TeacherReportsStack.Navigator
       screenOptions={{
         headerShown: true,
-        headerStyle: {
-          backgroundColor: colors.background,
-        },
-        headerTintColor: colors.primary,
-        headerTitleStyle: {
-          fontWeight: '700',
-          fontSize: 16,
-        },
+        headerStyle: { backgroundColor: colors.dark },
+        headerTintColor: '#FFFFFF',
+        headerTitleStyle: { fontWeight: '700', fontSize: 16, color: '#FFFFFF' },
       }}
     >
       <TeacherReportsStack.Screen
@@ -88,6 +79,13 @@ function TeacherReportsStackScreen() {
           title: 'Reportes',
           headerLargeTitle: true,
         }}
+      />
+      <TeacherReportsStack.Screen
+        name="EvaluationResponses"
+        component={EvaluationResponsesScreen}
+        options={({ route }: any) => ({
+          title: route.params?.cycleName || 'Resultados de Evaluación',
+        })}
       />
     </TeacherReportsStack.Navigator>
   );
@@ -107,6 +105,8 @@ export function TeacherTabsNavigator() {
             iconName = focused ? 'book-open' : 'book';
           } else if (route.name === 'TeacherReportsTab') {
             iconName = focused ? 'chart-box' : 'chart-line';
+          } else if (route.name === 'TeacherProfileTab') {
+            iconName = focused ? 'account-circle' : 'account-circle-outline';
           }
 
           return (
@@ -118,13 +118,13 @@ export function TeacherTabsNavigator() {
           );
         },
         tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: '#999',
+        tabBarInactiveTintColor: colors.textMuted,
         tabBarStyle: {
+          backgroundColor: colors.surface,
+          borderTopColor: colors.border,
           paddingBottom: 8,
           paddingTop: 8,
           height: 60,
-          borderTopColor: '#e0e0e0',
-          borderTopWidth: 1,
         },
       })}
     >
@@ -140,6 +140,18 @@ export function TeacherTabsNavigator() {
         component={TeacherReportsStackScreen}
         options={{
           tabBarLabel: 'Reportes',
+        }}
+      />
+      <TeacherTabs.Screen
+        name="TeacherProfileTab"
+        component={ProfileScreen}
+        options={{
+          tabBarLabel: 'Perfil',
+          headerShown: true,
+          headerStyle: { backgroundColor: colors.dark },
+          headerTintColor: '#FFFFFF',
+          headerTitleStyle: { fontWeight: '700', fontSize: 16, color: '#FFFFFF' },
+          title: 'Mi perfil',
         }}
       />
     </TeacherTabs.Navigator>

@@ -1,0 +1,25 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`SurfaceCard matches the snapshot 1`] = `
+<View
+  style={
+    {
+      "backgroundColor": "#FFFFFF",
+      "borderRadius": 16,
+      "elevation": 2,
+      "padding": 16,
+      "shadowColor": "#000000",
+      "shadowOffset": {
+        "height": 4,
+        "width": 0,
+      },
+      "shadowOpacity": 0.06,
+      "shadowRadius": 12,
+    }
+  }
+>
+  <Text>
+    Snap
+  </Text>
+</View>
+`;

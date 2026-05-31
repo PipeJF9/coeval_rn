@@ -38,18 +38,22 @@ export interface CsvSyncResult {
   totalRows: number;
 }
 
+export type EvaluationScope = 'own_group' | 'all_groups';
+
 export interface EvaluationCycleData {
   id: string;
   courseId: string;
-  groupId: string;
+  categoryId: string;
+  groupId?: string;  // kept optional for backward compat with old records
   title: string;
   status: string;
   openedBy: string;
   openedAt: string;
   closesAt?: string | null;
   rubrics: string[];
-  
-  // Computed fields (derived from group/category lookups, not from ROBLE)
+  evaluationScope: EvaluationScope;
+
+  // Computed fields (derived from category/group lookups, not from ROBLE)
   isOpen?: boolean;
   isClosed?: boolean;
 }
@@ -73,6 +77,7 @@ export interface PendingEvaluationInfo {
     name: string;
   };
   peersToEvaluate: StudentOverview[];
+  peersGroupedByGroup: Array<{ group: GroupOverview; peers: StudentOverview[] }>;
   alreadyEvaluatedUids: string[];
 }
 
@@ -89,6 +94,16 @@ export interface EvaluationResult {
   totalEvaluators: number;
 }
 
+export interface GroupStats {
+  groupId: string;
+  groupName: string;
+  totalStudents: number;
+  evaluatedStudents: number;
+  averageScore: number;
+  pendingStudents: number;
+  completionRate: number;
+}
+
 export interface DashboardConsolidated {
   cycleTitle: string;
   results: EvaluationResult[];
@@ -98,4 +113,7 @@ export interface DashboardConsolidated {
   pendingStudents: number;
   totalEvaluationsSubmitted: number;
   rubricAverages: Record<string, number>;
+  groupStats: GroupStats[];
+  topStudents: EvaluationResult[];
+  lowStudents: EvaluationResult[];
 }

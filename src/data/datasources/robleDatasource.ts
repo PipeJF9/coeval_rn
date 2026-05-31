@@ -377,7 +377,7 @@ export class RobleDatasource {
     }
   }
 
-  async insertTable(tableName: string, records: any[]): Promise<boolean> {
+  async insertTable(tableName: string, records: any[]): Promise<any[]> {
     const url = `${this.databaseUrl}/${this.dbName}/insert`;
     try {
       this._log('INSERT_TABLE', `Inserting ${records.length} records into ${tableName}`);
@@ -386,22 +386,24 @@ export class RobleDatasource {
       this._log('INSERT_TABLE', `Response status: ${response.status}`);
       this._log('INSERT_TABLE', `Response data: ${JSON.stringify(response.data)}`);
 
-      // If status is 200 or 201, the insert was successful
       if (response.status === 200 || response.status === 201) {
-        this._log('INSERT_TABLE', `Success: HTTP ${response.status}`);
-        return true;
+        const data = response.data as RobleListResponse;
+        const inserted = data.inserted ?? [];
+        this._log('INSERT_TABLE', `Inserted ${inserted.length} records`);
+        return inserted;
       }
-      
+
       this._log('INSERT_TABLE', `Failed: HTTP ${response.status}`);
-      return false;
+      return [];
     } catch (error) {
       this._log('INSERT_TABLE', `Error inserting into ${tableName}: ${error}`);
-      return false;
+      return [];
     }
   }
 
-  async insertRecord(tableName: string, record: any): Promise<boolean> {
-    return this.insertTable(tableName, [record]);
+  async insertRecord(tableName: string, record: any): Promise<any | null> {
+    const inserted = await this.insertTable(tableName, [record]);
+    return inserted.length > 0 ? inserted[0] : null;
   }
 
   async updateRecord(tableName: string, where: any, set: any): Promise<boolean> {
@@ -427,7 +429,8 @@ export class RobleDatasource {
 
       // Decode JWT payload (add padding if needed)
       const payload = parts[1];
-      const padded = payload.padEnd(payload.length + (4 - (payload.length % 4)), '=');
+      const needed = (4 - (payload.length % 4)) % 4;
+      const padded = payload + '='.repeat(needed);
       const decoded = atob(padded);
       const claims = JSON.parse(decoded);
 

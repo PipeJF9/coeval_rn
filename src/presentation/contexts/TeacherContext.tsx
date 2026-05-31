@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { teacherUseCases } from '../../di/container';
-import { TeacherCourseOverview, EvaluationCycleData } from '../../domain/entities/academic';
+import { TeacherCourseOverview, EvaluationCycleData, EvaluationScope } from '../../domain/entities/academic';
 
 interface TeacherContextType {
   // State
@@ -18,14 +18,15 @@ interface TeacherContextType {
   selectCourse(course: TeacherCourseOverview): void;
   deselectCourse(): void;
   uploadCsv(courseId: string, categoryName: string, csvContent: string, uploadedBy: string): Promise<boolean>;
-  loadEvaluationCycles(groupId: string): Promise<void>;
+  loadEvaluationCycles(categoryId: string): Promise<void>;
   createEvaluationCycle(input: {
     courseId: string;
-    groupId: string;
+    categoryId: string;
     title: string;
     openedBy: string;
     rubrics: string[];
     closesAt?: string | null;
+    evaluationScope: EvaluationScope;
   }): Promise<EvaluationCycleData | null>;
   clearState(): void;
 }
@@ -134,9 +135,9 @@ export function TeacherProvider({ children }: { children: React.ReactNode }) {
   );
 
   const loadEvaluationCycles = useCallback(
-    async (groupId: string) => {
+    async (categoryId: string) => {
       try {
-        const cycles = await teacherUseCases.getEvaluationCycles.execute(groupId);
+        const cycles = await teacherUseCases.getEvaluationCycles.execute(categoryId);
         setEvaluationCycles(cycles);
       } catch (error) {
         console.error('[TEACHER] Error loading evaluation cycles:', error);
@@ -149,11 +150,12 @@ export function TeacherProvider({ children }: { children: React.ReactNode }) {
   const createEvaluationCycle = useCallback(
     async (input: {
       courseId: string;
-      groupId: string;
+      categoryId: string;
       title: string;
       openedBy: string;
       rubrics: string[];
       closesAt?: string | null;
+      evaluationScope: EvaluationScope;
     }) => {
       try {
         const cycle = await teacherUseCases.createEvaluationCycle.execute(input);

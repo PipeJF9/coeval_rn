@@ -1,19 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
   Alert,
   ActivityIndicator,
-  Modal,
-  TextInput,
-  FlatList,
+  Pressable,
   ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+
+import { colors, radius, spacing } from '../../../core/theme';
+import { PrimaryButton } from '../../components/PrimaryButton';
+import { AppTextInput } from '../../components/AppTextInput';
 import { useTeacher } from '../../contexts/TeacherContext';
 import { useAuth } from '../../contexts/AuthContext';
+import type { EvaluationScope } from '../../../domain/entities/academic';
 
 export const CreateEvaluationScreen = ({ route, navigation }: any) => {
   const courseId = route?.params?.courseId;
@@ -21,9 +24,8 @@ export const CreateEvaluationScreen = ({ route, navigation }: any) => {
   const { selectedCourse, createEvaluationCycle } = useTeacher();
 
   const [selectedCategory, setSelectedCategory] = useState<any>(null);
-  const [selectedGroup, setSelectedGroup] = useState<any>(null);
-  const [showGroupModal, setShowGroupModal] = useState(false);
   const [title, setTitle] = useState('');
+  const [evaluationScope, setEvaluationScope] = useState<EvaluationScope>('own_group');
   const [rubrics, setRubrics] = useState<string[]>(['Dimensión 1', 'Dimensión 2', 'Dimensión 3']);
   const [newRubric, setNewRubric] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -36,349 +38,261 @@ export const CreateEvaluationScreen = ({ route, navigation }: any) => {
   };
 
   const handleRemoveRubric = (index: number) => {
-    setRubrics(rubrics.filter((_, i: number) => i !== index));
+    setRubrics(rubrics.filter((_, i) => i !== index));
   };
 
-  const handleCreateCycle = async () => {
-    if (!title.trim()) {
-      Alert.alert('Error', 'Por favor ingresa un título');
-      return;
-    }
-
-    if (!selectedGroup) {
-      Alert.alert('Error', 'Por favor selecciona un grupo');
-      return;
-    }
-
-    if (rubrics.length === 0) {
-      Alert.alert('Error', 'Al menos un rubric es requerido');
-      return;
-    }
-
-    if (!user?.uid) {
-      Alert.alert('Error', 'Usuario no identificado');
-      return;
-    }
+  const handleCreate = async () => {
+    if (!selectedCategory) { Alert.alert('Error', 'Selecciona una actividad'); return; }
+    if (!title.trim()) { Alert.alert('Error', 'Ingresa un título'); return; }
+    if (rubrics.length === 0) { Alert.alert('Error', 'Agrega al menos un criterio'); return; }
+    if (!user?.uid) { Alert.alert('Error', 'Usuario no identificado'); return; }
 
     setIsCreating(true);
     try {
       const cycle = await createEvaluationCycle({
         courseId,
-        groupId: selectedGroup.id,
-        title,
+        categoryId: selectedCategory.id,
+        title: title.trim(),
         openedBy: user.uid,
         rubrics,
+        evaluationScope,
       });
-
       if (cycle) {
-        Alert.alert('Éxito', 'Ciclo de evaluación creado');
-        navigation.goBack();
+        Alert.alert('Ciclo creado', 'La evaluación ha sido creada correctamente.', [
+          { text: 'OK', onPress: () => navigation.goBack() },
+        ]);
       } else {
         Alert.alert('Error', 'No se pudo crear el ciclo');
       }
-    } catch (error) {
-      Alert.alert('Error', 'Error al crear el ciclo');
+    } catch {
+      Alert.alert('Error', 'Ocurrió un error al crear el ciclo');
     } finally {
       setIsCreating(false);
     }
   };
 
-  const groups = selectedCategory?.groups || [];
-
   return (
-    <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Step 1: Select Category */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>1. Selecciona Categoría</Text>
-
-          {selectedCourse && selectedCourse.categories.length > 0 ? (
-            <View style={styles.optionsList}>
-              {selectedCourse.categories.map((category) => (
-                <TouchableOpacity
+    <ScrollView
+      style={styles.root}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Step 1: Select activity */}
+      <StepCard step={1} title="Selecciona la actividad">
+        {selectedCourse && selectedCourse.categories.length > 0 ? (
+          <View style={styles.optionList}>
+            {selectedCourse.categories.map((category) => {
+              const active = selectedCategory?.id === category.id;
+              return (
+                <Pressable
                   key={category.id}
-                  style={[
-                    styles.optionButton,
-                    selectedCategory?.id === category.id && styles.optionButtonActive,
-                  ]}
-                  onPress={() => {
-                    setSelectedCategory(category);
-                    setSelectedGroup(null);
-                  }}
+                  style={[styles.optionRow, active && styles.optionRowActive]}
+                  onPress={() => setSelectedCategory(category)}
                 >
-                  <MaterialCommunityIcons
-                    name="folder"
-                    size={20}
-                    color={selectedCategory?.id === category.id ? '#0066cc' : '#666'}
-                  />
-                  <Text
-                    style={[
-                      styles.optionText,
-                      selectedCategory?.id === category.id && styles.optionTextActive,
-                    ]}
-                  >
-                    {category.name} ({category.groups.length} grupos)
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ) : (
-            <Text style={styles.emptyText}>No hay categorías disponibles</Text>
-          )}
-        </View>
-
-        {/* Step 2: Select Group */}
-        {selectedCategory && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>2. Selecciona Grupo</Text>
-
-            {groups.length > 0 ? (
-              <View style={styles.optionsList}>
-                {groups.map((group: any) => (
-                  <TouchableOpacity
-                    key={group.id}
-                    style={[
-                      styles.optionButton,
-                      selectedGroup?.id === group.id && styles.optionButtonActive,
-                    ]}
-                    onPress={() => setSelectedGroup(group)}
-                  >
-                    <MaterialCommunityIcons
-                      name="account-multiple"
-                      size={20}
-                      color={selectedGroup?.id === group.id ? '#0066cc' : '#666'}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={[
-                          styles.optionText,
-                          selectedGroup?.id === group.id && styles.optionTextActive,
-                        ]}
-                      >
-                        {group.name}
-                      </Text>
-                      <Text style={styles.optionSubtext}>
-                        {group.code} • {group.activeStudentsCount} estudiantes
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.emptyText}>No hay grupos en esta categoría</Text>
-            )}
+                  <View style={[styles.optionIcon, active && styles.optionIconActive]}>
+                    <MaterialCommunityIcons name="folder" size={18} color={active ? colors.primary : colors.textMuted} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.optionText, active && styles.optionTextActive]}>
+                      {category.name}
+                    </Text>
+                    <Text style={styles.optionSub}>
+                      {category.activeStudentsCount} estudiantes
+                    </Text>
+                  </View>
+                  {active && (
+                    <MaterialCommunityIcons name="check-circle" size={20} color={colors.primary} />
+                  )}
+                </Pressable>
+              );
+            })}
           </View>
+        ) : (
+          <Text style={styles.emptyText}>No hay actividades disponibles en este curso.</Text>
         )}
+      </StepCard>
 
-        {/* Step 3: Enter Title */}
-        {selectedGroup && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>3. Título del Ciclo</Text>
+      {/* Step 2: Title */}
+      {selectedCategory && (
+        <StepCard step={2} title="Título del ciclo">
+          <AppTextInput
+            label=""
+            value={title}
+            onChangeText={setTitle}
+            placeholder="Ej: Evaluación de presentaciones"
+            editable={!isCreating}
+          />
+        </StepCard>
+      )}
 
-            <TextInput
-              style={styles.input}
-              placeholder="Ej: Evaluación de Presentaciones"
-              value={title}
-              onChangeText={setTitle}
-              editable={!isCreating}
-            />
+      {/* Step 3: Scope */}
+      {selectedCategory && (
+        <StepCard step={3} title="Alcance de la evaluación">
+          <View style={styles.optionList}>
+            {SCOPE_OPTIONS.map((opt) => {
+              const active = evaluationScope === opt.value;
+              return (
+                <Pressable
+                  key={opt.value}
+                  style={[styles.optionRow, active && styles.optionRowActive]}
+                  onPress={() => setEvaluationScope(opt.value)}
+                  disabled={isCreating}
+                >
+                  <View style={[styles.optionIcon, active && styles.optionIconActive]}>
+                    <MaterialCommunityIcons name={opt.icon as any} size={18} color={active ? colors.primary : colors.textMuted} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.optionText, active && styles.optionTextActive]}>{opt.label}</Text>
+                    <Text style={styles.optionSub}>{opt.description}</Text>
+                  </View>
+                  {active && <MaterialCommunityIcons name="check-circle" size={20} color={colors.primary} />}
+                </Pressable>
+              );
+            })}
           </View>
-        )}
+        </StepCard>
+      )}
 
-        {/* Step 4: Define Rubrics */}
-        {selectedGroup && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>4. Dimensiones de Evaluación</Text>
-
-            <View style={styles.rubricsList}>
-              {rubrics.map((rubric: string, index: number) => (
-                <View key={index} style={styles.rubricItem}>
-                  <MaterialCommunityIcons
-                    name="drag-vertical"
-                    size={16}
-                    color="#999"
-                    style={styles.dragHandle}
-                  />
-                  <Text style={styles.rubricText}>{rubric}</Text>
-                  <TouchableOpacity
-                    onPress={() => handleRemoveRubric(index)}
-                    disabled={isCreating}
-                  >
-                    <MaterialCommunityIcons
-                      name="close"
-                      size={20}
-                      color="#dc3545"
-                    />
-                  </TouchableOpacity>
+      {/* Step 4: Criteria */}
+      {selectedCategory && (
+        <StepCard step={4} title="Criterios de evaluación">
+          <View style={styles.rubricList}>
+            {rubrics.map((rubric, index) => (
+              <View key={index} style={styles.rubricItem}>
+                <View style={styles.rubricIndexBox}>
+                  <Text style={styles.rubricIndexText}>{index + 1}</Text>
                 </View>
-              ))}
-            </View>
-
-            <View style={styles.addRubricBox}>
-              <TextInput
-                style={styles.rubricInput}
-                placeholder="Nueva dimensión..."
-                value={newRubric}
-                onChangeText={setNewRubric}
-                editable={!isCreating}
-              />
-              <TouchableOpacity
-                style={styles.addRubricButton}
-                onPress={handleAddRubric}
-                disabled={isCreating || !newRubric.trim()}
-              >
-                <MaterialCommunityIcons name="plus" size={20} color="#0066cc" />
-              </TouchableOpacity>
-            </View>
+                <Text style={styles.rubricText}>{rubric}</Text>
+                <Pressable
+                  onPress={() => handleRemoveRubric(index)}
+                  disabled={isCreating}
+                  hitSlop={8}
+                >
+                  <MaterialCommunityIcons name="close-circle-outline" size={20} color={colors.danger} />
+                </Pressable>
+              </View>
+            ))}
           </View>
-        )}
-
-        {/* Create Button */}
-        {selectedGroup && (
-          <View style={styles.section}>
-            <TouchableOpacity
-              style={[styles.createButton, isCreating && styles.buttonDisabled]}
-              onPress={handleCreateCycle}
-              disabled={isCreating}
+          <View style={styles.addRubricRow}>
+            <TextInput
+              style={styles.addRubricInput}
+              placeholder="Nuevo criterio..."
+              placeholderTextColor={colors.textMuted}
+              value={newRubric}
+              onChangeText={setNewRubric}
+              editable={!isCreating}
+              onSubmitEditing={handleAddRubric}
+              returnKeyType="done"
+            />
+            <Pressable
+              style={[styles.addRubricBtn, !newRubric.trim() && styles.addRubricBtnDisabled]}
+              onPress={handleAddRubric}
+              disabled={isCreating || !newRubric.trim()}
             >
-              {isCreating ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <MaterialCommunityIcons name="check" size={20} color="#fff" />
-                  <Text style={styles.createButtonText}>Crear Ciclo</Text>
-                </>
-              )}
-            </TouchableOpacity>
+              <MaterialCommunityIcons name="plus" size={20} color={newRubric.trim() ? '#fff' : colors.textMuted} />
+            </Pressable>
           </View>
-        )}
-      </ScrollView>
-    </View>
+        </StepCard>
+      )}
+
+      {/* Create button */}
+      {selectedCategory && title.trim() && (
+        <View style={styles.createSection}>
+          <PrimaryButton
+            title="Crear ciclo de evaluación"
+            onPress={handleCreate}
+            loading={isCreating}
+          />
+        </View>
+      )}
+    </ScrollView>
   );
 };
 
+const SCOPE_OPTIONS: { value: EvaluationScope; label: string; description: string; icon: string }[] = [
+  {
+    value: 'own_group',
+    label: 'Compañeros de grupo',
+    description: 'Cada estudiante evalúa solo a los integrantes de su propio grupo',
+    icon: 'account-group',
+  },
+  {
+    value: 'all_groups',
+    label: 'Todos los grupos',
+    description: 'Cada estudiante evalúa a integrantes de todos los demás grupos de la categoría',
+    icon: 'account-multiple',
+  },
+];
+
+function StepCard({ step, title, children }: { step: number; title: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.stepCard}>
+      <View style={styles.stepHeader}>
+        <View style={styles.stepNumBox}>
+          <Text style={styles.stepNum}>{step}</Text>
+        </View>
+        <Text style={styles.stepTitle}>{title}</Text>
+      </View>
+      {children}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
+  root: { flex: 1, backgroundColor: colors.background },
+  content: { padding: spacing.lg, paddingBottom: 36 },
+
+  stepCard: {
+    backgroundColor: colors.surface, borderRadius: radius.lg,
+    padding: spacing.lg, marginBottom: spacing.md,
+    borderWidth: 1, borderColor: colors.border,
   },
-  section: {
-    padding: 16,
-    backgroundColor: '#fff',
-    marginVertical: 8,
+  stepHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
+  stepNumBox: {
+    width: 28, height: 28, borderRadius: radius.pill,
+    backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
   },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 12,
+  stepNum: { color: '#fff', fontSize: 13, fontWeight: '900' },
+  stepTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
+
+  optionList: { gap: spacing.sm },
+  optionRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md,
   },
-  optionsList: {
-    gap: 8,
+  optionRowActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  optionIcon: {
+    width: 36, height: 36, borderRadius: radius.sm,
+    backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center',
   },
-  optionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    gap: 12,
-  },
-  optionButtonActive: {
-    borderColor: '#0066cc',
-    backgroundColor: '#e6f0ff',
-  },
-  optionText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-  },
-  optionTextActive: {
-    color: '#0066cc',
-  },
-  optionSubtext: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 2,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#999',
-    textAlign: 'center',
-    paddingVertical: 20,
-  },
-  input: {
-    backgroundColor: '#f5f5f5',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#1a1a1a',
-  },
-  rubricsList: {
-    gap: 8,
-    marginBottom: 12,
-  },
+  optionIconActive: { backgroundColor: `${colors.primary}20` },
+  optionText: { fontSize: 14, fontWeight: '700', color: colors.textMuted },
+  optionTextActive: { color: colors.primary },
+  optionSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  emptyText: { color: colors.textMuted, fontSize: 13, textAlign: 'center', paddingVertical: spacing.md },
+
+  rubricList: { gap: spacing.sm, marginBottom: spacing.md },
   rubricItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 6,
-    gap: 8,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: colors.background, borderRadius: radius.md, padding: spacing.sm,
   },
-  dragHandle: {
-    marginRight: 4,
+  rubricIndexBox: {
+    width: 24, height: 24, borderRadius: radius.pill,
+    backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center',
   },
-  rubricText: {
-    flex: 1,
-    fontSize: 13,
-    color: '#1a1a1a',
+  rubricIndexText: { color: colors.primary, fontSize: 11, fontWeight: '900' },
+  rubricText: { flex: 1, fontSize: 13, color: colors.text, fontWeight: '600' },
+  addRubricRow: { flexDirection: 'row', gap: spacing.sm },
+  addRubricInput: {
+    flex: 1, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    fontSize: 13, color: colors.text,
   },
-  addRubricBox: {
-    flexDirection: 'row',
-    gap: 8,
+  addRubricBtn: {
+    width: 44, height: 44, backgroundColor: colors.primary,
+    borderRadius: radius.md, alignItems: 'center', justifyContent: 'center',
   },
-  rubricInput: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 13,
-  },
-  addRubricButton: {
-    width: 40,
-    height: 40,
-    borderWidth: 1,
-    borderColor: '#0066cc',
-    borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#e6f0ff',
-  },
-  createButton: {
-    backgroundColor: '#28a745',
-    paddingVertical: 12,
-    borderRadius: 8,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  createButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  addRubricBtnDisabled: { backgroundColor: colors.border },
+
+  createSection: { marginTop: spacing.xs },
 });

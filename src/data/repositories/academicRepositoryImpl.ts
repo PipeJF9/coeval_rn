@@ -24,10 +24,10 @@ export interface AcademicRepository {
 
   // Teacher/Admin flows
   getEvaluationCyclesByCourse(courseId: string): Promise<EvaluationCycleData[]>;
-  getEvaluationCyclesByGroup(groupId: string): Promise<EvaluationCycleData[]>;
+  getEvaluationCyclesByCategory(categoryId: string): Promise<EvaluationCycleData[]>;
   createEvaluationCycle(input: {
     courseId: string;
-    groupId: string;
+    categoryId: string;
     title: string;
     openedBy: string;
     rubrics: string[];
@@ -203,26 +203,26 @@ export class AcademicRepositoryImpl implements AcademicRepository {
     }
   }
 
-  async getEvaluationCyclesByGroup(groupId: string): Promise<EvaluationCycleData[]> {
+  async getEvaluationCyclesByCategory(categoryId: string): Promise<EvaluationCycleData[]> {
     try {
-      const cacheKey = CACHE_KEYS.EVALUATION_CYCLES(groupId);
+      const cacheKey = CACHE_KEYS.EVALUATION_CYCLES(categoryId);
       const cached = await this._getCachedData<EvaluationCycleData[]>(cacheKey);
       if (cached) {
         return cached;
       }
 
-      const cycles = await this.remoteDatasource.getEvaluationCyclesByGroup(groupId);
+      const cycles = await this.remoteDatasource.getEvaluationCyclesByCategory(categoryId);
       await this._setCachedData(cacheKey, cycles);
       return cycles;
     } catch (error) {
-      console.error(`[ACADEMIC] Error fetching cycles by group:`, error);
+      console.error(`[ACADEMIC] Error fetching cycles by category:`, error);
       return [];
     }
   }
 
   async createEvaluationCycle(input: {
     courseId: string;
-    groupId: string;
+    categoryId: string;
     title: string;
     openedBy: string;
     rubrics: string[];
@@ -231,7 +231,7 @@ export class AcademicRepositoryImpl implements AcademicRepository {
     try {
       const result = await this.remoteDatasource.createEvaluationCycle({
         courseId: input.courseId,
-        groupId: input.groupId,
+        categoryId: input.categoryId,
         title: input.title,
         openedBy: input.openedBy,
         rubrics: input.rubrics,

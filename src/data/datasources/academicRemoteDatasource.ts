@@ -3,6 +3,7 @@ import {
   CategoryOverview,
   CsvSyncResult,
   EvaluationCycleData,
+  EvaluationScope,
   GroupOverview,
   PendingEvaluationInfo,
   StudentOverview,
@@ -195,28 +196,34 @@ export class AcademicRemoteDatasource {
 
   private mapEvaluationCycle(row: Row): EvaluationCycleData {
     let rubrics: string[] = [];
+    let parsedCriteria: Record<string, unknown> = {};
     const criteriaRaw = row.criteria;
     if (criteriaRaw) {
       try {
-        const criteria = typeof criteriaRaw === 'string' ? JSON.parse(criteriaRaw) : (criteriaRaw as Row);
-        if (Array.isArray(criteria.rubrics)) {
-          rubrics = criteria.rubrics.map((item: unknown) => String(item));
+        parsedCriteria = typeof criteriaRaw === 'string' ? JSON.parse(criteriaRaw) : (criteriaRaw as Row);
+        if (Array.isArray(parsedCriteria.rubrics)) {
+          rubrics = parsedCriteria.rubrics.map((item: unknown) => String(item));
         }
       } catch {
         rubrics = [];
       }
     }
 
+    // categoryId is stored in groupId (ROBLE schema doesn't support categoryId column)
+    const categoryId = this.str(row.groupId || row.categoryId);
     return {
       id: this.str(row._id),
       courseId: this.str(row.courseId),
-      groupId: this.str(row.groupId),
+      categoryId,
+      groupId: undefined,
       title: this.str(row.title),
       status: this.str(row.status),
       openedBy: this.str(row.openedBy),
       openedAt: this.parseDate(row.openedAt),
       closesAt: row.closeAt == null ? null : this.parseDate(row.closeAt),
       rubrics,
+      // evaluationScope is stored inside criteria (ROBLE has no top-level evaluationScope column)
+      evaluationScope: (parsedCriteria.evaluationScope as EvaluationScope) || 'own_group',
     };
   }
 
@@ -395,32 +402,24 @@ export class AcademicRemoteDatasource {
     return rows.map((row) => this.mapEvaluationCycle(row));
   }
 
-  async getEvaluationCyclesByGroup(groupId: string) {
-    const rows = await this.readTable(this.evaluationCyclesTable, { groupId });
+  async getEvaluationCyclesByCategory(categoryId: string) {
+    // categoryId is stored in the groupId column (ROBLE schema only allows groupId)
+    const rows = await this.readTable(this.evaluationCyclesTable, { groupId: categoryId });
     return rows.map((row) => this.mapEvaluationCycle(row));
   }
 
   async createEvaluationCycle(input: {
     courseId: string;
-    groupId: string;
+    categoryId: string;
     title: string;
     openedBy: string;
     rubrics: string[];
     closesAt?: string | null;
   }) {
-    // Get group information
-    const groupRows = await this.readTable(this.groupsTable, { _id: input.groupId });
-    if (groupRows.length === 0) {
-      throw new Error('Grupo no encontrado');
-    }
-
-    const group = groupRows[0];
-    const categoryId = this.str(group.categoryId);
-    const categoryRows = await this.readTable(this.categoriesTable, { _id: categoryId });
-
+    // Store categoryId in the groupId column (ROBLE schema doesn't support categoryId)
     const inserted = await this.insertRecord(this.evaluationCyclesTable, {
       courseId: input.courseId,
-      groupId: input.groupId,
+      groupId: input.categoryId,
       title: input.title,
       openedBy: input.openedBy,
       openedAt: new Date().toISOString(),
@@ -527,14 +526,22 @@ export class AcademicRemoteDatasource {
       }
     }
 
-    // 7. Load open evaluation cycles for each group
+    // 7. Load open evaluation cycles for each categoryId the student belongs to
+    // (categoryId is stored in the groupId column — ROBLE schema doesn't have categoryId)
     const openCycles: EvaluationCycleData[] = [];
-    for (const groupId of [...new Set(groupIds)]) {
+    const seenCycleIds = new Set<string>();
+    for (const categoryId of categoryIds) {
       const cycleRows = await this.readTable(this.evaluationCyclesTable, {
-        groupId,
+        groupId: categoryId,
         status: 'open',
       });
-      openCycles.push(...cycleRows.map((row) => this.mapEvaluationCycle(row)));
+      for (const row of cycleRows) {
+        const id = this.str(row._id);
+        if (id && !seenCycleIds.has(id)) {
+          seenCycleIds.add(id);
+          openCycles.push(this.mapEvaluationCycle(row));
+        }
+      }
     }
 
     if (openCycles.length === 0) {
@@ -544,28 +551,81 @@ export class AcademicRemoteDatasource {
     // 8. Build result for each cycle
     const result: PendingEvaluationInfo[] = [];
 
+    // Pre-compute student's group IDs per category for reuse across cycles
+    const studentGroupIdsInCategory = (categoryId: string) =>
+      [...new Set(groupIds)].filter((gid) => {
+        const g = groupsById.get(gid);
+        return g && this.str(g.categoryId) === categoryId;
+      });
+
+    const isSelf = (s: StudentOverview) => {
+      const email = s.email.trim().toLowerCase();
+      const uid = s.uid.trim();
+      return email === normalizedEmail || (normalizedUid.length > 0 && uid === normalizedUid);
+    };
+
     for (const cycle of openCycles) {
-      const groupId = cycle.groupId;
-      const groupData = groupsById.get(groupId);
-
-      if (!groupData) {
-        continue;
-      }
-
-      const categoryId = this.str(groupData.categoryId);
+      const categoryId = cycle.categoryId;
       const category = categoriesById.get(categoryId);
       const categoryName = category ? this.str(category.name) : '';
+      const scope = cycle.evaluationScope;
 
-      // 9. Load active enrollments for the group
-      const activeEnrollments = await this.readActiveEnrollmentsByGroupIds([groupId]);
-      const students = activeEnrollments.map((enrollment) => this.mapStudentOverview(enrollment));
+      // 9. Build peersGroupedByGroup based on scope
+      const ownGroupIds = studentGroupIdsInCategory(categoryId);
+      const ownGroupIdSet = new Set(ownGroupIds);
+      const seenPeerKeys = new Set<string>();
+      const peersGroupedByGroup: PendingEvaluationInfo['peersGroupedByGroup'] = [];
 
-      // 10. Filter to peers (not self)
-      const peersToEvaluate = students.filter((student) => {
-        const email = student.email.trim().toLowerCase();
-        const uid = student.uid.trim();
-        return email !== normalizedEmail && (normalizedUid.length === 0 || uid !== normalizedUid);
-      });
+      if (scope === 'all_groups') {
+        // Load all groups in the category, skip student's own groups
+        const allCatGroupRows = await this.readTable(this.groupsTable, { categoryId });
+        for (const groupRow of allCatGroupRows) {
+          const gid = this.str(groupRow._id);
+          if (!gid || ownGroupIdSet.has(gid)) continue;
+          const enrollments = await this.readActiveEnrollmentsByGroupIds([gid]);
+          const groupPeers: StudentOverview[] = [];
+          for (const e of enrollments) {
+            const s = this.mapStudentOverview(e);
+            const key = s.uid || s.email;
+            if (!seenPeerKeys.has(key)) {
+              seenPeerKeys.add(key);
+              groupPeers.push(s);
+            }
+          }
+          if (groupPeers.length > 0) {
+            peersGroupedByGroup.push({
+              group: this.mapGroupOverview(groupRow, groupPeers),
+              peers: groupPeers,
+            });
+          }
+        }
+      } else {
+        // 'own_group': only student's groups in this category
+        for (const gid of ownGroupIds) {
+          const groupData = groupsById.get(gid);
+          if (!groupData) continue;
+          const enrollments = await this.readActiveEnrollmentsByGroupIds([gid]);
+          const allInGroup = enrollments.map((e) => this.mapStudentOverview(e));
+          const groupPeers: StudentOverview[] = [];
+          for (const s of allInGroup) {
+            if (isSelf(s)) continue;
+            const key = s.uid || s.email;
+            if (!seenPeerKeys.has(key)) {
+              seenPeerKeys.add(key);
+              groupPeers.push(s);
+            }
+          }
+          if (groupPeers.length > 0) {
+            peersGroupedByGroup.push({
+              group: this.mapGroupOverview(groupData, allInGroup),
+              peers: groupPeers,
+            });
+          }
+        }
+      }
+
+      // 10. Flat peer list derived from groups
+      const peersToEvaluate = peersGroupedByGroup.flatMap((g) => g.peers);
 
       if (peersToEvaluate.length === 0) {
         continue;
@@ -573,9 +633,7 @@ export class AcademicRemoteDatasource {
 
       // 11. Find already evaluated peers
       const evaluatorKeys = new Set<string>();
-      if (normalizedUid) {
-        evaluatorKeys.add(normalizedUid);
-      }
+      if (normalizedUid) evaluatorKeys.add(normalizedUid);
       if (normalizedEmail) {
         evaluatorKeys.add(normalizedEmail);
         evaluatorKeys.add(`email:${normalizedEmail}`);
@@ -597,24 +655,26 @@ export class AcademicRemoteDatasource {
           ...(peerUid ? [peerUid] : []),
           ...(peerEmail ? [peerEmail, `email:${peerEmail}`] : []),
         ]);
-
-        const matched = [...submittedById.values()].some((evaluation) =>
-          peerKeys.has(evaluation.evaluateeUid.trim().toLowerCase())
+        const matched = [...submittedById.values()].some((ev) =>
+          peerKeys.has(ev.evaluateeUid.trim().toLowerCase())
         );
-        if (matched && peerUid) {
-          alreadyEvaluatedUids.add(peerUid);
-        }
+        if (matched && peerUid) alreadyEvaluatedUids.add(peerUid);
       }
 
-      // 12. Build group overview
-      const group = this.mapGroupOverview(groupData, students);
+      // 12. Own group for the `group` metadata field
+      const ownGroupId = ownGroupIds[0] ?? groupIds[0] ?? '';
+      const ownGroupData = groupsById.get(ownGroupId);
+      const ownGroup = ownGroupData
+        ? this.mapGroupOverview(ownGroupData, peersToEvaluate)
+        : { id: ownGroupId, code: '', name: '', activeStudentsCount: peersToEvaluate.length, students: peersToEvaluate };
 
       result.push({
         cycle,
-        group,
+        group: ownGroup,
         categoryName,
         category: { name: categoryName },
         peersToEvaluate,
+        peersGroupedByGroup,
         alreadyEvaluatedUids: [...alreadyEvaluatedUids],
       });
     }
@@ -644,27 +704,26 @@ export class AcademicRemoteDatasource {
         throw new Error('El ciclo está cerrado');
       }
 
-      // Get categoryId from the group
-      const groupId = this.str(cycle.groupId);
-      this._log('SUBMIT_EVALUATION', `groupId from cycle: ${groupId}`);
+      // Get all groups in the cycle's category
+      const categoryId = this.str(cycle.categoryId);
+      this._log('SUBMIT_EVALUATION', `categoryId from cycle: ${categoryId}`);
 
-      const groups = await this.readTable(this.groupsTable, { _id: groupId });
-      const categoryId = groups.length > 0 ? this.str(groups[0].categoryId) : '';
-      
-      this._log('SUBMIT_EVALUATION', `Searching for enrollments with categoryGroupIds=[${groupId}]`);
+      const categoryGroupRows = categoryId
+        ? await this.readTable(this.groupsTable, { categoryId })
+        : [];
+      const categoryGroupIds = categoryGroupRows.map((g) => this.str(g._id)).filter(Boolean);
+      // Fall back to legacy groupId if categoryId not set
+      if (categoryGroupIds.length === 0 && cycle.groupId) {
+        categoryGroupIds.push(cycle.groupId);
+      }
+
+      this._log('SUBMIT_EVALUATION', `Searching for enrollments in ${categoryGroupIds.length} groups`);
       this._log('SUBMIT_EVALUATION', `Looking for evaluator: ${input.evaluatorUid}, evaluatee: ${input.evaluateeUid}`);
 
-      const evaluatorEnrollment = await this.findActiveStudentInGroups(input.evaluatorUid, [groupId]);
-      const evaluateeEnrollment = await this.findActiveStudentInGroups(input.evaluateeUid, [groupId]);
+      const evaluatorEnrollment = await this.findActiveStudentInGroups(input.evaluatorUid, categoryGroupIds);
+      const evaluateeEnrollment = await this.findActiveStudentInGroups(input.evaluateeUid, categoryGroupIds);
 
       this._log('SUBMIT_EVALUATION', `Found evaluator enrollments: ${evaluatorEnrollment.length}, evaluatee enrollments: ${evaluateeEnrollment.length}`);
-      
-      if (evaluatorEnrollment.length > 0) {
-        this._log('SUBMIT_EVALUATION', `Evaluator enrollment: groupId=${this.str(evaluatorEnrollment[0].groupId)}`);
-      }
-      if (evaluateeEnrollment.length > 0) {
-        this._log('SUBMIT_EVALUATION', `Evaluatee enrollment: groupId=${this.str(evaluateeEnrollment[0].groupId)}, _id=${this.str(evaluateeEnrollment[0]._id)}`);
-      }
 
       let existing = await this.readTable(this.evaluationsTable, {
         cycleId: input.cycleId,
@@ -693,9 +752,9 @@ export class AcademicRemoteDatasource {
         results: { scores: input.scores },
         comments: input.comments ?? '',
         updatedAt: new Date().toISOString(),
-        evaluatorGroupIdAtEval: evaluatorEnrollment.length > 0 ? this.str(evaluatorEnrollment[0].groupId) : groupId,
-        evaluateeGroupIdAtEval: evaluateeEnrollment.length > 0 ? this.str(evaluateeEnrollment[0].groupId) : groupId,
-        enrollmentIdAtEval: evaluateeEnrollment.length > 0 ? this.str(evaluateeEnrollment[0]._id) : groupId,
+        evaluatorGroupIdAtEval: evaluatorEnrollment.length > 0 ? this.str(evaluatorEnrollment[0].groupId) : (categoryGroupIds[0] ?? ''),
+        evaluateeGroupIdAtEval: evaluateeEnrollment.length > 0 ? this.str(evaluateeEnrollment[0].groupId) : (categoryGroupIds[0] ?? ''),
+        enrollmentIdAtEval: evaluateeEnrollment.length > 0 ? this.str(evaluateeEnrollment[0]._id) : '',
       };
       
       this._log('SUBMIT_EVALUATION', `Payload: ${JSON.stringify(payload)}`);

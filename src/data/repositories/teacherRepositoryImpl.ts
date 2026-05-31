@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TeacherRemoteDataSource } from '../datasources/teacherRemoteDatasource';
-import { TeacherCourseOverview, CsvSyncResult, EvaluationCycleData } from '../../domain/entities/academic';
+import { TeacherCourseOverview, CsvSyncResult, EvaluationCycleData, EvaluationScope } from '../../domain/entities/academic';
 
 export interface TeacherRepository {
   // Courses
@@ -16,14 +16,15 @@ export interface TeacherRepository {
   }): Promise<CsvSyncResult>;
 
   // Evaluation Cycles
-  getEvaluationCyclesByGroup(groupId: string): Promise<EvaluationCycleData[]>;
+  getEvaluationCyclesByCategory(categoryId: string): Promise<EvaluationCycleData[]>;
   createEvaluationCycle(input: {
     courseId: string;
-    groupId: string;
+    categoryId: string;
     title: string;
     openedBy: string;
     rubrics: string[];
     closesAt?: string | null;
+    evaluationScope: EvaluationScope;
   }): Promise<EvaluationCycleData | null>;
 
   // Cache
@@ -32,7 +33,7 @@ export interface TeacherRepository {
 
 const CACHE_KEYS = {
   TEACHER_COURSES: (teacherUid: string) => `teacher:courses:${teacherUid}`,
-  EVALUATION_CYCLES: (groupId: string) => `teacher:cycles:${groupId}`,
+  EVALUATION_CYCLES: (categoryId: string) => `teacher:cycles:cat:${categoryId}`,
 };
 
 const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutos
@@ -144,8 +145,8 @@ export class TeacherRepositoryImpl implements TeacherRepository {
     }
   }
 
-  async getEvaluationCyclesByGroup(groupId: string): Promise<EvaluationCycleData[]> {
-    const cacheKey = CACHE_KEYS.EVALUATION_CYCLES(groupId);
+  async getEvaluationCyclesByCategory(categoryId: string): Promise<EvaluationCycleData[]> {
+    const cacheKey = CACHE_KEYS.EVALUATION_CYCLES(categoryId);
 
     const cached = await this._getCachedData<EvaluationCycleData[]>(cacheKey);
     if (cached) {
@@ -153,7 +154,7 @@ export class TeacherRepositoryImpl implements TeacherRepository {
     }
 
     try {
-      const cycles = await this.remoteDatasource.getEvaluationCyclesByGroup(groupId);
+      const cycles = await this.remoteDatasource.getEvaluationCyclesByCategory(categoryId);
       await this._setCachedData(cacheKey, cycles);
       return cycles;
     } catch (error) {
@@ -164,11 +165,12 @@ export class TeacherRepositoryImpl implements TeacherRepository {
 
   async createEvaluationCycle(input: {
     courseId: string;
-    groupId: string;
+    categoryId: string;
     title: string;
     openedBy: string;
     rubrics: string[];
     closesAt?: string | null;
+    evaluationScope: EvaluationScope;
   }): Promise<EvaluationCycleData | null> {
     try {
       const cycle = await this.remoteDatasource.createEvaluationCycle(input);

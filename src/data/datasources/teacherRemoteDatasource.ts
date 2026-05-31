@@ -5,6 +5,7 @@ import {
   GroupOverview,
   CsvSyncResult,
   EvaluationCycleData,
+  EvaluationScope,
 } from '../../domain/entities/academic';
 import { RobleDatasource } from './robleDatasource';
 
@@ -580,57 +581,67 @@ export class TeacherRemoteDataSource {
     };
   }
 
-  async getEvaluationCyclesByGroup(groupId: string): Promise<EvaluationCycleData[]> {
-    const rows = await this.readTable(this.evaluationCyclesTable, { groupId });
+  async getEvaluationCyclesByCategory(categoryId: string): Promise<EvaluationCycleData[]> {
+    // categoryId is stored in the groupId column (ROBLE schema only allows groupId)
+    const rows = await this.readTable(this.evaluationCyclesTable, { groupId: categoryId });
     return rows.map((row) => this.mapEvaluationCycle(row));
   }
 
   private mapEvaluationCycle(row: Row): EvaluationCycleData {
     let rubrics: string[] = [];
+    let parsedCriteria: Record<string, unknown> = {};
     const criteriaRaw = row.criteria;
     if (criteriaRaw) {
       try {
-        const criteria = typeof criteriaRaw === 'string' ? JSON.parse(criteriaRaw) : (criteriaRaw as Row);
-        if (Array.isArray(criteria.rubrics)) {
-          rubrics = criteria.rubrics.map((item: unknown) => String(item));
+        parsedCriteria = typeof criteriaRaw === 'string' ? JSON.parse(criteriaRaw) : (criteriaRaw as Row);
+        if (Array.isArray(parsedCriteria.rubrics)) {
+          rubrics = parsedCriteria.rubrics.map((item: unknown) => String(item));
         }
       } catch {
         rubrics = [];
       }
     }
 
+    // categoryId is stored in groupId (ROBLE schema doesn't support categoryId column)
+    const categoryId = this.str(row.groupId || row.categoryId);
     return {
       id: this.str(row._id),
       courseId: this.str(row.courseId),
-      groupId: this.str(row.groupId),
+      categoryId,
+      groupId: undefined,
       title: this.str(row.title),
       status: this.str(row.status),
       openedBy: this.str(row.openedBy),
       openedAt: this.parseDate(row.openedAt),
       closesAt: row.closeAt == null ? null : this.parseDate(row.closeAt),
       rubrics,
+      // evaluationScope is stored inside criteria (ROBLE has no top-level evaluationScope column)
+      evaluationScope: (parsedCriteria.evaluationScope as EvaluationScope) || 'own_group',
     };
   }
 
   async createEvaluationCycle(input: {
     courseId: string;
-    groupId: string;
+    categoryId: string;
     title: string;
     openedBy: string;
     rubrics: string[];
     closesAt?: string | null;
+    evaluationScope: EvaluationScope;
   }): Promise<EvaluationCycleData | null> {
     const now = new Date().toISOString();
 
+    // Store categoryId in the groupId column (ROBLE schema doesn't support categoryId)
     const inserted = await this.insertRecord(this.evaluationCyclesTable, {
       courseId: input.courseId,
-      groupId: input.groupId,
+      groupId: input.categoryId,
       title: input.title,
       openedBy: input.openedBy,
       openedAt: now,
       closeAt: input.closesAt ?? null,
       status: 'open',
-      criteria: { rubrics: input.rubrics },
+      // evaluationScope stored inside criteria — ROBLE schema has no evaluationScope column
+      criteria: { rubrics: input.rubrics, evaluationScope: input.evaluationScope },
     });
 
     if (!inserted) return null;

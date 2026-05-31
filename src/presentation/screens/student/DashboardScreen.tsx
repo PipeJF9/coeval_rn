@@ -52,8 +52,21 @@ export function DashboardScreen() {
 
               {Object.entries(item.rubricScores).map(([label, value]) => (
                 <View key={label} style={styles.rubricRow}>
-                  <Text style={styles.rubricLabel}>{label}</Text>
-                  <Text style={[styles.rubricValue, { color: getScoreColor(value) }]}>{value.toFixed(1)}</Text>
+                  <View style={styles.rubricLabelRow}>
+                    <Text style={styles.rubricLabel}>{label}</Text>
+                    <Text style={[styles.rubricValue, { color: getScoreColor(value) }]}>{value.toFixed(1)}</Text>
+                  </View>
+                  <View style={styles.rubricTrack}>
+                    <View
+                      style={[
+                        styles.rubricFill,
+                        {
+                          width: `${Math.min((value / 5) * 100, 100)}%` as any,
+                          backgroundColor: getScoreColor(value),
+                        },
+                      ]}
+                    />
+                  </View>
                 </View>
               ))}
 
@@ -70,7 +83,11 @@ export function DashboardScreen() {
         )}
         ListEmptyComponent={(
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No tienes resultados todavía.</Text>
+            <View style={styles.emptyIconBox}>
+              <MaterialCommunityIcons name="chart-box-outline" size={44} color={colors.primary} />
+            </View>
+            <Text style={styles.emptyTitle}>Sin resultados todavía</Text>
+            <Text style={styles.emptySubtitle}>Cuando tus compañeros completen evaluaciones, aparecerán aquí.</Text>
           </View>
         )}
       />
@@ -102,11 +119,20 @@ const styles = StyleSheet.create({
   cardMeta: { marginTop: 2, color: colors.textMuted, fontSize: 12 },
   score: { fontSize: 28, fontWeight: '900' },
   divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.md },
-  rubricRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
-  rubricLabel: { color: colors.text, fontSize: 13 },
+  rubricRow: { marginBottom: spacing.sm },
+  rubricLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.xs },
+  rubricLabel: { color: colors.text, fontSize: 13, fontWeight: '500' },
   rubricValue: { fontWeight: '800', fontSize: 13 },
+  rubricTrack: { height: 6, backgroundColor: colors.border, borderRadius: radius.pill, overflow: 'hidden' },
+  rubricFill: { height: '100%', borderRadius: radius.pill },
   commentsBlock: { marginTop: spacing.md },
   commentText: { color: colors.textMuted, fontSize: 13, fontStyle: 'italic', marginBottom: 4 },
-  emptyState: { padding: spacing.xl, alignItems: 'center' },
-  emptyTitle: { color: colors.text, fontWeight: '800', fontSize: 16 },
+  emptyState: { paddingVertical: spacing.xl * 2, alignItems: 'center', paddingHorizontal: spacing.xl },
+  emptyIconBox: {
+    width: 88, height: 88, borderRadius: radius.xl,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg,
+  },
+  emptyTitle: { color: colors.text, fontWeight: '900', fontSize: 18 },
+  emptySubtitle: { color: colors.textMuted, fontSize: 13, marginTop: spacing.xs, textAlign: 'center' },
 });

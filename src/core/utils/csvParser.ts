@@ -48,16 +48,74 @@ export class AcademicCsvParser {
     return value == null ? '' : String(value);
   }
 
-  parseRows(csvContent: string): CsvStudentRow[] {
-    const lines = csvContent
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
+  // RFC 4180 compliant CSV parser — handles quoted fields, embedded commas, escaped quotes
+  private parseRfc4180(csvContent: string): string[][] {
+    const rows: string[][] = [];
+    let row: string[] = [];
+    let field = '';
+    let inQuotes = false;
+    let i = 0;
 
+    while (i < csvContent.length) {
+      const c = csvContent[i];
+
+      if (inQuotes) {
+        if (c === '"') {
+          if (i + 1 < csvContent.length && csvContent[i + 1] === '"') {
+            field += '"';
+            i += 2;
+          } else {
+            inQuotes = false;
+            i++;
+          }
+        } else {
+          field += c;
+          i++;
+        }
+      } else {
+        if (c === '"') {
+          inQuotes = true;
+          i++;
+        } else if (c === ',') {
+          row.push(field);
+          field = '';
+          i++;
+        } else if (c === '\r') {
+          row.push(field);
+          field = '';
+          rows.push(row);
+          row = [];
+          if (i + 1 < csvContent.length && csvContent[i + 1] === '\n') {
+            i++;
+          }
+          i++;
+        } else if (c === '\n') {
+          row.push(field);
+          field = '';
+          rows.push(row);
+          row = [];
+          i++;
+        } else {
+          field += c;
+          i++;
+        }
+      }
+    }
+
+    // Flush remaining field/row
+    if (field.length > 0 || row.length > 0) {
+      row.push(field);
+      rows.push(row);
+    }
+
+    return rows;
+  }
+
+  parseRows(csvContent: string): CsvStudentRow[] {
+    const rows = this.parseRfc4180(csvContent);
     const parsed: CsvStudentRow[] = [];
 
-    for (const line of lines) {
-      const raw = line.split(',').map((part) => part.trim());
+    for (const raw of rows) {
       if (raw.length < 7) {
         continue;
       }
@@ -116,6 +174,8 @@ export class AcademicCsvParser {
             .filter((part) => part.trim().length > 0)
             .join(' ')
             .trim();
+        } else if (col4 === '') {
+          studentName = [col5, col6].filter((part) => part.trim().length > 0).join(' ').trim();
         } else {
           studentName = [col4, col5].filter((part) => part.trim().length > 0).join(' ').trim();
         }

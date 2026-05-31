@@ -1,293 +1,244 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
   ActivityIndicator,
-  TouchableOpacity,
+  FlatList,
+  Pressable,
   RefreshControl,
-  Alert,
-  SectionList,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useTeacher } from '../../contexts/TeacherContext';
 
-export const TeacherReportsScreen = ({ route, navigation }: any) => {
-  const { courseId } = route.params;
-  const { selectedCourse, isLoadingCourses } = useTeacher();
-  const [reportData, setReportData] = useState<any>(null);
+import { colors, radius, spacing } from '../../../core/theme';
+import { SurfaceCard } from '../../components/SurfaceCard';
+import { useAuth } from '../../contexts/AuthContext';
+import { useTeacher } from '../../contexts/TeacherContext';
+import { EvaluationCycleData } from '../../../domain/entities/academic';
+import { academicUseCases } from '../../../di/container';
+
+export const TeacherReportsScreen = ({ navigation }: any) => {
+  const { courses, isLoadingCourses, loadCourses } = useTeacher();
+  const { user } = useAuth();
+
+  const [expandedCourseId, setExpandedCourseId] = useState<string | null>(null);
+  const [cyclesByCourse, setCyclesByCourse] = useState<Record<string, EvaluationCycleData[]>>({});
+  const [loadingCourseId, setLoadingCourseId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    loadReports();
-  }, [courseId]);
+    if (user?.uid && courses.length === 0 && !isLoadingCourses) {
+      loadCourses(user.uid);
+    }
+  }, [user?.uid]);
 
-  const loadReports = async () => {
-    try {
-      setRefreshing(true);
-      // TODO: Call TeacherContext method to fetch reports
-      // For now, placeholder structure
-      setReportData({
-        courseName: selectedCourse?.name || 'Curso',
-        totalEvaluations: 0,
-        pendingEvaluations: 0,
-        submittedEvaluations: 0,
-        categories: [],
-      });
-    } catch (error) {
-      Alert.alert('Error', 'No se pudieron cargar los reportes');
-    } finally {
-      setRefreshing(false);
+  const onRefresh = async () => {
+    if (!user?.uid) return;
+    setRefreshing(true);
+    setCyclesByCourse({});
+    setExpandedCourseId(null);
+    await loadCourses(user.uid);
+    setRefreshing(false);
+  };
+
+  const toggleCourse = async (courseId: string) => {
+    if (expandedCourseId === courseId) {
+      setExpandedCourseId(null);
+      return;
+    }
+    setExpandedCourseId(courseId);
+    if (!cyclesByCourse[courseId]) {
+      setLoadingCourseId(courseId);
+      try {
+        const cycles = await academicUseCases.getEvaluationCyclesByCourse.execute(courseId);
+        setCyclesByCourse((prev) => ({ ...prev, [courseId]: cycles }));
+      } catch {
+        setCyclesByCourse((prev) => ({ ...prev, [courseId]: [] }));
+      } finally {
+        setLoadingCourseId(null);
+      }
     }
   };
 
-  if (isLoadingCourses) {
+  const formatDate = (dateStr: string) => {
+    const d = new Date(dateStr);
+    return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+  };
+
+  if (isLoadingCourses && courses.length === 0) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#0066cc" />
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
-  const sections = [
-    {
-      title: 'Resumen General',
-      data: [
-        {
-          label: 'Evaluaciones Enviadas',
-          value: reportData?.submittedEvaluations || 0,
-          icon: 'check-circle',
-          color: '#28a745',
-        },
-        {
-          label: 'Evaluaciones Pendientes',
-          value: reportData?.pendingEvaluations || 0,
-          icon: 'clock-outline',
-          color: '#ffc107',
-        },
-        {
-          label: 'Total de Evaluaciones',
-          value: reportData?.totalEvaluations || 0,
-          icon: 'file-chart',
-          color: '#0066cc',
-        },
-      ],
-    },
-    {
-      title: 'Por Categoría',
-      data: reportData?.categories || [],
-    },
-  ];
-
-  const renderSummaryItem = ({ item }: any) => (
-    <View style={styles.summaryCard}>
-      <View style={[styles.iconBox, { backgroundColor: `${item.color}20` }]}>
-        <MaterialCommunityIcons name={item.icon} size={24} color={item.color} />
-      </View>
-      <View style={styles.summaryContent}>
-        <Text style={styles.summaryLabel}>{item.label}</Text>
-        <Text style={styles.summaryValue}>{item.value}</Text>
-      </View>
-    </View>
-  );
-
-  const renderCategoryItem = ({ item }: any) => (
-    <TouchableOpacity
-      style={styles.categoryCard}
-      onPress={() =>
-        navigation.navigate('CategoryReportsScreen', {
-          categoryId: item.id,
-          categoryName: item.name,
-        })
-      }
-    >
-      <View>
-        <Text style={styles.categoryName}>{item.name}</Text>
-        <Text style={styles.categoryStats}>
-          {item.groups} grupos • {item.students} estudiantes
+  if (!isLoadingCourses && courses.length === 0) {
+    return (
+      <View style={styles.center}>
+        <View style={styles.emptyIconBox}>
+          <MaterialCommunityIcons name="chart-box-outline" size={44} color={colors.primary} />
+        </View>
+        <Text style={styles.emptyTitle}>Sin cursos</Text>
+        <Text style={styles.emptySubtitle}>
+          Crea un curso y agrega ciclos de evaluación para ver reportes aquí.
         </Text>
       </View>
-      <View style={styles.categoryScore}>
-        <Text style={styles.scoreText}>
-          {item.averageScore ? item.averageScore.toFixed(1) : 'N/A'}
-        </Text>
-        <Text style={styles.scoreLabel}>/ 5.0</Text>
-      </View>
-      <MaterialCommunityIcons
-        name="chevron-right"
-        size={24}
-        color="#999"
-      />
-    </TouchableOpacity>
-  );
-
-  const renderSectionHeader = ({ section }: any) => (
-    <Text style={styles.sectionHeader}>{section.title}</Text>
-  );
+    );
+  }
 
   return (
-    <View style={styles.container}>
-      <SectionList
-        sections={sections}
-        keyExtractor={(item: any, index: number) => `${index}`}
-        renderItem={({ item, section }: any) =>
-          section.title === 'Resumen General'
-            ? renderSummaryItem({ item })
-            : renderCategoryItem({ item })
-        }
-        renderSectionHeader={renderSectionHeader}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={loadReports} />
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <MaterialCommunityIcons
-              name="chart-box-outline"
-              size={48}
-              color="#ccc"
-            />
-            <Text style={styles.emptyText}>
-              No hay evaluaciones aún
-            </Text>
-            <Text style={styles.emptySubtext}>
-              Los reportes aparecerán aquí cuando se envíen evaluaciones
-            </Text>
-          </View>
-        }
-        contentContainerStyle={sections[0].data.length > 0 ? undefined : { flex: 1 }}
-      />
+    <FlatList
+      data={courses}
+      keyExtractor={(item) => item.id}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+      }
+      ListHeaderComponent={
+        <Text style={styles.hint}>Selecciona un curso para ver sus ciclos y resultados</Text>
+      }
+      renderItem={({ item: course }) => {
+        const isExpanded = expandedCourseId === course.id;
+        const isLoadingThis = loadingCourseId === course.id;
+        const cycles = cyclesByCourse[course.id] ?? [];
 
-      {/* Export Button */}
-      <TouchableOpacity
-        style={styles.exportButton}
-        onPress={() => Alert.alert('Exportar', 'Funcionalidad en desarrollo')}
-      >
-        <MaterialCommunityIcons name="file-export" size={20} color="#fff" />
-        <Text style={styles.exportButtonText}>Exportar CSV</Text>
-      </TouchableOpacity>
-    </View>
+        return (
+          <View style={styles.courseBlock}>
+            <Pressable style={styles.courseRow} onPress={() => toggleCourse(course.id)}>
+              <View style={styles.courseIconBox}>
+                <MaterialCommunityIcons name="book-open-variant" size={20} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.courseName} numberOfLines={1}>{course.name}</Text>
+                <Text style={styles.courseMeta}>
+                  NRC {course.nrc} · {course.term} · {course.groupsCount} grupos · {course.activeStudentsCount} est.
+                </Text>
+              </View>
+              {isLoadingThis ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <MaterialCommunityIcons
+                  name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                  size={22}
+                  color={colors.textMuted}
+                />
+              )}
+            </Pressable>
+
+            {isExpanded && (
+              <View style={styles.cyclesContainer}>
+                {cycles.length === 0 ? (
+                  <View style={styles.noCyclesState}>
+                    <MaterialCommunityIcons name="clipboard-text-outline" size={20} color={colors.border} />
+                    <Text style={styles.noCyclesText}>Sin ciclos de evaluación</Text>
+                  </View>
+                ) : (
+                  cycles.map((cycle, index) => {
+                    const isOpen = cycle.status === 'open' || cycle.isOpen === true;
+                    const isLast = index === cycles.length - 1;
+                    return (
+                      <Pressable
+                        key={cycle.id}
+                        style={[styles.cycleRow, !isLast && styles.cycleRowBorder]}
+                        onPress={() =>
+                          navigation.navigate('EvaluationResponses', {
+                            cycleId: cycle.id,
+                            cycleName: cycle.title,
+                          })
+                        }
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.cycleTitle} numberOfLines={1}>{cycle.title}</Text>
+                          {cycle.rubrics.length > 0 && (
+                            <Text style={styles.cycleRubrics} numberOfLines={1}>
+                              {cycle.rubrics.join(' · ')}
+                            </Text>
+                          )}
+                          {cycle.closesAt && (
+                            <Text style={styles.cycleMeta}>Cierra: {formatDate(cycle.closesAt)}</Text>
+                          )}
+                        </View>
+                        <View style={styles.cycleRight}>
+                          <View style={[styles.statusPill, isOpen ? styles.pillOpen : styles.pillClosed]}>
+                            <View style={[styles.statusDot, { backgroundColor: isOpen ? colors.success : colors.border }]} />
+                            <Text style={[styles.statusText, { color: isOpen ? colors.success : colors.textMuted }]}>
+                              {isOpen ? 'Abierta' : 'Cerrada'}
+                            </Text>
+                          </View>
+                          <MaterialCommunityIcons name="chevron-right" size={18} color={colors.border} />
+                        </View>
+                      </Pressable>
+                    );
+                  })
+                )}
+              </View>
+            )}
+          </View>
+        );
+      }}
+    />
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xxl },
+  emptyIconBox: {
+    width: 88, height: 88, borderRadius: radius.xl,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg,
   },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sectionHeader: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#666',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#f0f0f0',
-  },
-  summaryCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    margin: 12,
-    marginBottom: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-    borderRadius: 10,
+  emptyTitle: { color: colors.text, fontSize: 18, fontWeight: '900' },
+  emptySubtitle: { color: colors.textMuted, fontSize: 13, marginTop: spacing.xs, textAlign: 'center', lineHeight: 20 },
+
+  content: { padding: spacing.md, paddingBottom: 36 },
+  hint: { fontSize: 13, color: colors.textMuted, textAlign: 'center', marginBottom: spacing.md },
+
+  courseBlock: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    marginBottom: spacing.sm,
+    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
-    gap: 12,
+    borderColor: colors.border,
   },
-  iconBox: {
-    width: 48,
-    height: 48,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
+  courseRow: {
+    flexDirection: 'row', alignItems: 'center',
+    padding: spacing.md, gap: spacing.sm,
   },
-  summaryContent: {
-    flex: 1,
+  courseIconBox: {
+    width: 40, height: 40, borderRadius: radius.sm,
+    backgroundColor: colors.primarySoft,
+    justifyContent: 'center', alignItems: 'center',
   },
-  summaryLabel: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 2,
+  courseName: { fontSize: 15, fontWeight: '700', color: colors.text },
+  courseMeta: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+
+  cyclesContainer: {
+    borderTopWidth: 1, borderTopColor: colors.border,
+    paddingHorizontal: spacing.md, paddingBottom: spacing.sm, paddingTop: spacing.xs,
   },
-  summaryValue: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1a1a1a',
+  noCyclesState: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingVertical: spacing.md,
   },
-  categoryCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 12,
-    marginVertical: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    gap: 12,
+  noCyclesText: { fontSize: 13, color: colors.textMuted, fontStyle: 'italic' },
+
+  cycleRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.md, gap: spacing.sm },
+  cycleRowBorder: { borderBottomWidth: 1, borderBottomColor: colors.background },
+  cycleTitle: { fontSize: 14, fontWeight: '700', color: colors.text },
+  cycleRubrics: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  cycleMeta: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
+
+  cycleRight: { alignItems: 'flex-end', gap: 4 },
+  statusPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: spacing.sm, paddingVertical: 3,
+    borderRadius: radius.pill,
   },
-  categoryName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1a1a1a',
-  },
-  categoryStats: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 2,
-  },
-  categoryScore: {
-    alignItems: 'flex-end',
-  },
-  scoreText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0066cc',
-  },
-  scoreLabel: {
-    fontSize: 11,
-    color: '#999',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  emptyText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#999',
-    marginTop: 12,
-  },
-  emptySubtext: {
-    fontSize: 13,
-    color: '#bbb',
-    marginTop: 6,
-    textAlign: 'center',
-  },
-  exportButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginHorizontal: 16,
-    marginVertical: 12,
-    paddingVertical: 12,
-    backgroundColor: '#0066cc',
-    borderRadius: 8,
-  },
-  exportButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  pillOpen: { backgroundColor: '#e6f9ee' },
+  pillClosed: { backgroundColor: colors.background },
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  statusText: { fontSize: 10, fontWeight: '700' },
 });

@@ -1,552 +1,511 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
-  Modal,
-  TextInput,
   Alert,
-  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+
+import { colors, radius, spacing } from '../../../core/theme';
+import { SurfaceCard } from '../../components/SurfaceCard';
+import { PrimaryButton } from '../../components/PrimaryButton';
 import { useTeacher } from '../../contexts/TeacherContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { TeacherCourseOverview } from '../../../domain/entities/academic';
-
-const Papa = require('papaparse');
+import { EvaluationCycleData } from '../../../domain/entities/academic';
+import { academicUseCases } from '../../../di/container';
 
 export const TeacherCourseDetailScreen = ({ route, navigation }: any) => {
   const courseId = route?.params?.courseId;
   const { user } = useAuth();
-  const { courses, isSyncingCsv, syncProgress, uploadCsv } = useTeacher();
+  const { courses, isSyncingCsv, syncProgress, uploadCsv, selectCourse } = useTeacher();
 
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [selectedFile, setSelectedFile] = useState<{ uri: string; name: string } | null>(null);
-  const [categoryName, setCategoryName] = useState('');
+  const [derivedCategoryName, setDerivedCategoryName] = useState('');
   const [csvContent, setCsvContent] = useState('');
 
-  // Find the course from the courses array
+  const [cycles, setCycles] = useState<EvaluationCycleData[]>([]);
+  const [isLoadingCycles, setIsLoadingCycles] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
   const course = courses.find((c) => c.id === courseId);
+
+  useEffect(() => {
+    if (course) selectCourse(course);
+  }, [course?.id]);
+
+  useEffect(() => {
+    if (courseId) loadCycles();
+  }, [courseId]);
+
+  const loadCycles = async () => {
+    setIsLoadingCycles(true);
+    try {
+      const result = await academicUseCases.getEvaluationCyclesByCourse.execute(courseId);
+      setCycles(result);
+    } catch {
+      // silently fail
+    } finally {
+      setIsLoadingCycles(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadCycles();
+    setRefreshing(false);
+  };
+
+  const extractCategoryName = (fileName: string): string | null => {
+    const nameWithoutExt = fileName.replace(/\.csv$/i, '');
+    const normalized = nameWithoutExt.toLowerCase()
+      .replace(/[áàäâã]/g, 'a').replace(/[éèëê]/g, 'e')
+      .replace(/[íìïî]/g, 'i').replace(/[óòöôõ]/g, 'o')
+      .replace(/[úùüû]/g, 'u').replace(/ñ/g, 'n');
+    if (!normalized.startsWith('categoria')) return null;
+    return nameWithoutExt;
+  };
+
+  const resetCsvModal = () => {
+    setSelectedFile(null);
+    setCsvContent('');
+    setDerivedCategoryName('');
+    setShowCsvModal(false);
+  };
 
   const handlePickFile = async () => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: 'text/csv',
-      });
-
+      const result = await DocumentPicker.getDocumentAsync({ type: 'text/csv' });
       if (!result.canceled && result.assets.length > 0) {
         const file = result.assets[0];
+        const categoryName = extractCategoryName(file.name);
+        if (!categoryName) {
+          Alert.alert('Nombre de archivo inválido', 'El archivo debe comenzar con "Categoria" (ej: CategoriaA_AllGroups.csv)');
+          return;
+        }
         setSelectedFile({ uri: file.uri, name: file.name });
-
-        // Read file content
+        setDerivedCategoryName(categoryName);
         const response = await fetch(file.uri);
-        const text = await response.text();
-        setCsvContent(text);
+        setCsvContent(await response.text());
       }
-    } catch (error) {
+    } catch {
       Alert.alert('Error', 'No se pudo seleccionar el archivo');
     }
   };
 
   const handleUploadCsv = async () => {
-    if (!categoryName.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el nombre de la categoría');
-      return;
-    }
+    if (!csvContent.trim()) { Alert.alert('Error', 'Selecciona un archivo CSV'); return; }
+    if (!user?.uid || !course) { Alert.alert('Error', 'Información incompleta'); return; }
 
-    if (!csvContent.trim()) {
-      Alert.alert('Error', 'Por favor selecciona un archivo CSV');
-      return;
-    }
-
-    if (!user?.uid || !course) {
-      Alert.alert('Error', 'Información incompleta');
-      return;
-    }
-
-    try {
-      const success = await uploadCsv(course.id, categoryName, csvContent, user.uid);
-
-      if (success) {
-        setCategoryName('');
-        setSelectedFile(null);
-        setCsvContent('');
-        setShowCsvModal(false);
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Error al subir el CSV');
+    const success = await uploadCsv(course.id, derivedCategoryName, csvContent, user.uid);
+    if (success) {
+      resetCsvModal();
+      await loadCycles();
     }
   };
 
   if (!course) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>Curso no encontrado</Text>
+      <View style={styles.fallback}>
+        <Text style={styles.fallbackText}>Curso no encontrado</Text>
       </View>
     );
   }
 
+  // Organize cycles by categoryId
+  const cyclesByCategory = new Map<string, EvaluationCycleData[]>();
+  for (const cycle of cycles) {
+    const key = cycle.categoryId || '';
+    if (!key) continue;
+    const list = cyclesByCategory.get(key) ?? [];
+    list.push(cycle);
+    cyclesByCategory.set(key, list);
+  }
+
+  const formatDate = (dateStr: string) => {
+    const d = new Date(dateStr);
+    return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+  };
+
   return (
-    <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Course Header */}
+    <View style={styles.root}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+      >
+        {/* Course header */}
         <View style={styles.courseHeader}>
           <Text style={styles.courseName}>{course.name}</Text>
           <View style={styles.courseMetaRow}>
-            <View style={styles.metaItem}>
-              <MaterialCommunityIcons name="identifier" size={16} color="#666" />
-              <Text style={styles.metaText}>{course.nrc}</Text>
+            <View style={styles.metaChip}>
+              <MaterialCommunityIcons name="identifier" size={14} color="rgba(255,255,255,0.7)" />
+              <Text style={styles.metaChipText}>{course.nrc}</Text>
             </View>
-            <View style={styles.metaItem}>
-              <MaterialCommunityIcons name="calendar" size={16} color="#666" />
-              <Text style={styles.metaText}>{course.term}</Text>
+            <View style={styles.metaChip}>
+              <MaterialCommunityIcons name="calendar" size={14} color="rgba(255,255,255,0.7)" />
+              <Text style={styles.metaChipText}>{course.term}</Text>
+            </View>
+          </View>
+          <View style={styles.headerStats}>
+            <View style={styles.headerStatItem}>
+              <Text style={styles.headerStatValue}>{course.activeStudentsCount}</Text>
+              <Text style={styles.headerStatLabel}>Estudiantes</Text>
+            </View>
+            <View style={styles.headerStatDivider} />
+            <View style={styles.headerStatItem}>
+              <Text style={styles.headerStatValue}>{course.groupsCount}</Text>
+              <Text style={styles.headerStatLabel}>Grupos</Text>
+            </View>
+            <View style={styles.headerStatDivider} />
+            <View style={styles.headerStatItem}>
+              <Text style={styles.headerStatValue}>{course.categoriesCount}</Text>
+              <Text style={styles.headerStatLabel}>Categorías</Text>
             </View>
           </View>
         </View>
 
-        {/* Actions */}
-        <View style={styles.actionsSection}>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => setShowCsvModal(true)}
-          >
-            <MaterialCommunityIcons name="file-upload" size={20} color="#fff" />
-            <Text style={styles.actionButtonText}>Cargar CSV</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.actionButton, styles.secondaryButton]}
+        {/* Action buttons */}
+        <View style={styles.actionsRow}>
+          <Pressable style={styles.actionBtn} onPress={() => setShowCsvModal(true)}>
+            <MaterialCommunityIcons name="file-upload" size={18} color="#fff" />
+            <Text style={styles.actionBtnText}>Cargar CSV</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.actionBtn, styles.actionBtnOutline]}
             onPress={() => navigation.navigate('CreateEvaluation', { courseId: course.id })}
           >
-            <MaterialCommunityIcons name="plus" size={20} color="#0066cc" />
-            <Text style={[styles.actionButtonText, { color: '#0066cc' }]}>Evaluación</Text>
-          </TouchableOpacity>
+            <MaterialCommunityIcons name="plus-circle-outline" size={18} color={colors.primary} />
+            <Text style={[styles.actionBtnText, { color: colors.primary }]}>Nueva evaluación</Text>
+          </Pressable>
         </View>
 
-        {/* Categories and Groups */}
+        {/* Categories section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Categorías ({course.categoriesCount})</Text>
-
+          <Text style={styles.sectionTitle}>Actividades ({course.categoriesCount})</Text>
           {course.categories.length === 0 ? (
-            <View style={styles.emptyState}>
-              <MaterialCommunityIcons name="folder-open" size={32} color="#ccc" />
-              <Text style={styles.emptyText}>No hay categorías aún</Text>
-            </View>
+            <EmptyCard icon="folder-open-outline" message="Sin actividades. Carga un CSV para crear." />
           ) : (
             course.categories.map((category) => (
               <View key={category.id} style={styles.categoryCard}>
-                <View style={styles.categoryHeader}>
+                <View style={styles.categoryCardHeader}>
+                  <View style={styles.categoryIconBox}>
+                    <MaterialCommunityIcons name="folder" size={16} color={colors.primary} />
+                  </View>
                   <Text style={styles.categoryName}>{category.name}</Text>
                   <View style={styles.categoryBadge}>
                     <Text style={styles.categoryBadgeText}>{category.groups.length} grupos</Text>
                   </View>
                 </View>
-
-                <View style={styles.groupsList}>
-                  {category.groups.map((group) => (
-                    <View key={group.id} style={styles.groupItem}>
-                      <View>
-                        <Text style={styles.groupName}>{group.name}</Text>
-                        <Text style={styles.groupCode}>{group.code}</Text>
-                      </View>
-                      <View style={styles.studentCountBadge}>
-                        <MaterialCommunityIcons name="account-multiple" size={14} color="#fff" />
-                        <Text style={styles.studentCountText}>{group.activeStudentsCount}</Text>
-                      </View>
+                {category.groups.map((group, idx) => (
+                  <View
+                    key={group.id}
+                    style={[styles.groupRow, idx < category.groups.length - 1 && styles.groupRowDivider]}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.groupName}>{group.name}</Text>
+                      <Text style={styles.groupCode}>{group.code}</Text>
                     </View>
-                  ))}
-                </View>
+                    <View style={styles.studentCountBadge}>
+                      <MaterialCommunityIcons name="account-multiple" size={12} color="#fff" />
+                      <Text style={styles.studentCountText}>{group.activeStudentsCount}</Text>
+                    </View>
+                  </View>
+                ))}
               </View>
             ))
           )}
         </View>
 
-        {/* Summary Stats */}
-        <View style={styles.summarySection}>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryValue}>{course.activeStudentsCount}</Text>
-            <Text style={styles.summaryLabel}>Estudiantes</Text>
+        {/* Evaluation cycles section */}
+        <View style={styles.section}>
+          <View style={styles.sectionTitleRow}>
+            <Text style={styles.sectionTitle}>Ciclos de evaluación</Text>
+            {isLoadingCycles && <ActivityIndicator size="small" color={colors.primary} />}
           </View>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryValue}>{course.groupsCount}</Text>
-            <Text style={styles.summaryLabel}>Grupos</Text>
-          </View>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryValue}>{course.categoriesCount}</Text>
-            <Text style={styles.summaryLabel}>Categorías</Text>
-          </View>
+
+          {!isLoadingCycles && cycles.length === 0 ? (
+            <EmptyCard icon="clipboard-text-outline" message="Sin ciclos. Pulsa «Nueva evaluación» para crear." />
+          ) : (
+            course.categories.map((category) => {
+              const categoryCycles = cyclesByCategory.get(category.id) ?? [];
+              if (categoryCycles.length === 0) return null;
+              return (
+                <View key={category.id} style={styles.cycleCategoryBlock}>
+                  <Text style={styles.cycleCategoryLabel}>{category.name.toUpperCase()}</Text>
+                  {categoryCycles.map((cycle) => {
+                    const isOpen = cycle.status === 'open' || cycle.isOpen === true;
+                    return (
+                      <Pressable
+                        key={cycle.id}
+                        style={styles.cycleCard}
+                        onPress={() =>
+                          navigation.navigate('EvaluationResponses', {
+                            cycleId: cycle.id,
+                            cycleName: cycle.title,
+                          })
+                        }
+                      >
+                        <View style={styles.cycleCardHeader}>
+                          <Text style={styles.cycleTitle} numberOfLines={1}>{cycle.title}</Text>
+                          <View style={[styles.statusPill, isOpen ? styles.pillOpen : styles.pillClosed]}>
+                            <View style={[styles.statusDot, { backgroundColor: isOpen ? colors.success : colors.border }]} />
+                            <Text style={[styles.statusText, { color: isOpen ? colors.success : colors.textMuted }]}>
+                              {isOpen ? 'Abierta' : 'Cerrada'}
+                            </Text>
+                          </View>
+                          <MaterialCommunityIcons name="chart-bar" size={16} color={colors.primary} />
+                        </View>
+                        {cycle.rubrics.length > 0 && (
+                          <View style={styles.rubricChips}>
+                            {cycle.rubrics.map((r, i) => (
+                              <View key={i} style={styles.rubricChip}>
+                                <Text style={styles.rubricChipText}>{r}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                        {cycle.closesAt && (
+                          <View style={styles.cycleClosesRow}>
+                            <MaterialCommunityIcons name="clock-outline" size={11} color={colors.textMuted} />
+                            <Text style={styles.cycleClosesText}>Cierra: {formatDate(cycle.closesAt)}</Text>
+                          </View>
+                        )}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              );
+            })
+          )}
         </View>
       </ScrollView>
 
-      {/* CSV Upload Modal */}
-      <Modal visible={showCsvModal} animationType="slide" onRequestClose={() => setShowCsvModal(false)}>
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowCsvModal(false)}>
-              <Text style={styles.modalCloseButton}>✕</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>Cargar CSV</Text>
-            <View style={{ width: 30 }} />
-          </View>
-
-          <ScrollView style={styles.modalContent}>
-            <Text style={styles.instructionText}>
-              Selecciona un archivo CSV con la siguiente estructura:{'\n'}
-              categoryName | groupDisplayName | groupName | email | id | name | etc.
-            </Text>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Nombre de Categoría</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Ej: Categoría A"
-                value={categoryName}
-                onChangeText={setCategoryName}
-                editable={!isSyncingCsv}
-              />
+      {/* CSV upload modal */}
+      <Modal
+        visible={showCsvModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={resetCsvModal}
+      >
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.select({ ios: 'padding', android: undefined })}>
+          <View style={styles.modalRoot}>
+            <View style={styles.modalHeader}>
+              <Pressable onPress={resetCsvModal} hitSlop={10}>
+                <MaterialCommunityIcons name="close" size={24} color={colors.textMuted} />
+              </Pressable>
+              <Text style={styles.modalTitle}>Cargar CSV</Text>
+              <View style={{ width: 24 }} />
             </View>
-
-            <TouchableOpacity
-              style={[styles.filePickButton, isSyncingCsv && styles.buttonDisabled]}
-              onPress={handlePickFile}
-              disabled={isSyncingCsv}
-            >
-              <MaterialCommunityIcons name="file-upload" size={24} color="#0066cc" />
-              <View>
-                <Text style={styles.filePickButtonText}>
-                  {selectedFile ? 'Archivo seleccionado' : 'Seleccionar archivo'}
+            <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
+              <View style={styles.csvHintBox}>
+                <MaterialCommunityIcons name="information-outline" size={16} color={colors.info} />
+                <Text style={styles.csvHintText}>
+                  El nombre del archivo debe comenzar con "Categoria" (ej: CategoriaA_AllGroups.csv).{'\n'}La categoría se detectará automáticamente del nombre del archivo.
                 </Text>
-                {selectedFile && (
-                  <Text style={styles.fileNameText}>{selectedFile.name}</Text>
-                )}
               </View>
-            </TouchableOpacity>
-
-            {syncProgress && (
-              <View
-                style={[
-                  styles.progressBox,
-                  syncProgress.status === 'success' && styles.successBox,
-                  syncProgress.status === 'error' && styles.errorBox,
-                ]}
+              <Pressable
+                style={[styles.filePickBtn, isSyncingCsv && styles.disabled]}
+                onPress={handlePickFile}
+                disabled={isSyncingCsv}
               >
-                <Text style={styles.progressText}>{syncProgress.message}</Text>
-              </View>
-            )}
+                <MaterialCommunityIcons name="file-upload-outline" size={24} color={colors.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.filePickText}>
+                    {selectedFile ? selectedFile.name : 'Seleccionar archivo CSV'}
+                  </Text>
+                  {!selectedFile && (
+                    <Text style={styles.filePickSub}>Toca para abrir el selector de archivos</Text>
+                  )}
+                </View>
+                {selectedFile && (
+                  <MaterialCommunityIcons name="check-circle" size={20} color={colors.success} />
+                )}
+              </Pressable>
+              {derivedCategoryName ? (
+                <View style={styles.detectedCategoryBox}>
+                  <MaterialCommunityIcons name="folder-check" size={16} color={colors.success} />
+                  <Text style={styles.detectedCategoryText}>Categoría detectada: <Text style={styles.detectedCategoryName}>{derivedCategoryName}</Text></Text>
+                </View>
+              ) : null}
 
-            <TouchableOpacity
-              style={[styles.submitButton, isSyncingCsv && styles.buttonDisabled]}
-              onPress={handleUploadCsv}
-              disabled={isSyncingCsv}
-            >
-              {isSyncingCsv ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.submitButtonText}>Procesar CSV</Text>
+              {syncProgress && (
+                <View
+                  style={[
+                    styles.progressBox,
+                    syncProgress.status === 'success' && styles.progressSuccess,
+                    syncProgress.status === 'error' && styles.progressError,
+                  ]}
+                >
+                  <Text style={styles.progressText}>{syncProgress.message}</Text>
+                </View>
               )}
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
+
+              <View style={{ height: spacing.lg }} />
+              <PrimaryButton
+                title="Procesar CSV"
+                onPress={handleUploadCsv}
+                loading={isSyncingCsv}
+              />
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
 };
 
+function EmptyCard({ icon, message }: { icon: any; message: string }) {
+  return (
+    <View style={styles.emptyCard}>
+      <MaterialCommunityIcons name={icon} size={28} color={colors.border} />
+      <Text style={styles.emptyCardText}>{message}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-  },
+  root: { flex: 1, backgroundColor: colors.background },
+  fallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
+  fallbackText: { color: colors.text, fontSize: 16, fontWeight: '700' },
+
   courseHeader: {
-    backgroundColor: '#fff',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    backgroundColor: colors.dark,
+    padding: spacing.xl,
+    paddingTop: spacing.lg,
   },
-  courseName: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 8,
-  },
-  courseMetaRow: {
+  courseName: { color: '#FFFFFF', fontSize: 26, fontWeight: '900' },
+  courseMetaRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  metaChip: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  metaChipText: { color: 'rgba(255,255,255,0.75)', fontSize: 13 },
+  headerStats: {
     flexDirection: 'row',
-    gap: 16,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    marginTop: spacing.lg,
   },
-  metaItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  metaText: {
-    fontSize: 13,
-    color: '#666',
-  },
+  headerStatItem: { flex: 1, alignItems: 'center' },
+  headerStatDivider: { width: 1, backgroundColor: 'rgba(255,255,255,0.12)' },
+  headerStatValue: { color: '#FFFFFF', fontSize: 20, fontWeight: '900' },
+  headerStatLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 2 },
 
-  actionsSection: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    flexDirection: 'row',
-    gap: 12,
+  actionsRow: {
+    flexDirection: 'row', gap: spacing.sm,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
   },
-  actionButton: {
-    flex: 1,
-    backgroundColor: '#0066cc',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+  actionBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+    backgroundColor: colors.primary, paddingVertical: spacing.md, borderRadius: radius.md,
   },
-  secondaryButton: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#0066cc',
+  actionBtnOutline: {
+    backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.primary,
   },
-  actionButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  actionBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 
-  section: {
-    padding: 16,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 12,
-  },
+  section: { padding: spacing.lg, paddingTop: spacing.md },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
+  sectionTitle: { fontSize: 16, fontWeight: '900', color: colors.text, marginBottom: spacing.md },
+
   categoryCard: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    borderLeftWidth: 3,
-    borderLeftColor: '#0066cc',
+    backgroundColor: colors.surface, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: colors.border,
+    marginBottom: spacing.md, overflow: 'hidden',
   },
-  categoryHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
+  categoryCardHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    padding: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.background,
   },
-  categoryName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a1a',
+  categoryIconBox: {
+    width: 28, height: 28, borderRadius: radius.sm,
+    backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center',
   },
-  categoryBadge: {
-    backgroundColor: '#e6f0ff',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  categoryBadgeText: {
-    fontSize: 12,
-    color: '#0066cc',
-    fontWeight: '600',
-  },
-
-  groupsList: {
-    gap: 8,
-  },
-  groupItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  groupName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#1a1a1a',
-  },
-  groupCode: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 2,
-  },
+  categoryName: { flex: 1, fontSize: 14, fontWeight: '700', color: colors.text },
+  categoryBadge: { backgroundColor: colors.primarySoft, paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.pill },
+  categoryBadgeText: { fontSize: 11, color: colors.primary, fontWeight: '700' },
+  groupRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  groupRowDivider: { borderBottomWidth: 1, borderBottomColor: colors.background },
+  groupName: { fontSize: 13, fontWeight: '700', color: colors.text },
+  groupCode: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
   studentCountBadge: {
-    backgroundColor: '#0066cc',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: colors.primary, paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.pill,
   },
-  studentCountText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
+  studentCountText: { color: '#fff', fontSize: 11, fontWeight: '700' },
 
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 20,
-    backgroundColor: '#fff',
-    borderRadius: 8,
+  emptyCard: {
+    backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.xl,
+    alignItems: 'center', borderWidth: 1, borderColor: colors.border, gap: spacing.sm,
   },
-  emptyText: {
-    fontSize: 14,
-    color: '#999',
-    marginTop: 8,
-  },
+  emptyCardText: { color: colors.textMuted, fontSize: 13, textAlign: 'center' },
 
-  summarySection: {
-    paddingHorizontal: 16,
-    paddingBottom: 20,
-    flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'space-around',
+  cycleCategoryBlock: { marginBottom: spacing.md },
+  cycleCategoryLabel: { fontSize: 11, fontWeight: '700', color: colors.textMuted, letterSpacing: 0.6, marginBottom: spacing.sm },
+  cycleCard: {
+    backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md,
+    marginBottom: spacing.sm, borderWidth: 1, borderColor: colors.border,
   },
-  summaryCard: {
-    backgroundColor: '#fff',
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    flex: 1,
-    alignItems: 'center',
+  cycleCardHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.xs },
+  cycleTitle: { flex: 1, fontSize: 14, fontWeight: '700', color: colors.text },
+  statusPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.pill,
   },
-  summaryValue: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#0066cc',
+  pillOpen: { backgroundColor: '#e6f9ee' },
+  pillClosed: { backgroundColor: colors.background },
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  statusText: { fontSize: 10, fontWeight: '700' },
+  rubricChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: spacing.xs },
+  rubricChip: {
+    backgroundColor: colors.primarySoft, paddingHorizontal: spacing.sm, paddingVertical: 3, borderRadius: radius.sm,
   },
-  summaryLabel: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 4,
-  },
+  rubricChipText: { fontSize: 11, color: colors.primary, fontWeight: '600' },
+  cycleClosesRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: spacing.xs },
+  cycleClosesText: { fontSize: 11, color: colors.textMuted },
 
-  // Modal styles
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-    marginTop: 40,
-  },
+  modalRoot: { flex: 1, backgroundColor: colors.background },
   modalHeader: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: colors.surface, paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
   },
-  modalCloseButton: {
-    fontSize: 24,
-    color: '#666',
-    width: 30,
+  modalTitle: { color: colors.text, fontSize: 18, fontWeight: '800' },
+  modalScroll: { flex: 1 },
+  modalContent: { padding: spacing.lg },
+  csvHintBox: {
+    flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start',
+    backgroundColor: `${colors.info}10`, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.lg,
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1a1a1a',
+  csvHintText: { flex: 1, fontSize: 12, color: colors.text, lineHeight: 18 },
+  filePickBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.primary,
+    borderStyle: 'dashed', borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md,
   },
-  modalContent: {
-    flex: 1,
-    padding: 20,
+  filePickText: { fontSize: 14, fontWeight: '700', color: colors.primary },
+  filePickSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  detectedCategoryBox: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: `${colors.success}12`, borderRadius: radius.md,
+    padding: spacing.md, marginBottom: spacing.md,
   },
-  instructionText: {
-    fontSize: 12,
-    color: '#666',
-    backgroundColor: '#f0f0f0',
-    padding: 12,
-    borderRadius: 6,
-    marginBottom: 16,
-  },
-  formGroup: {
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: '#f5f5f5',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#1a1a1a',
-  },
-  filePickButton: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderWidth: 2,
-    borderColor: '#0066cc',
-    borderStyle: 'dashed',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
-  },
-  filePickButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#0066cc',
-  },
-  fileNameText: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
+  detectedCategoryText: { flex: 1, fontSize: 13, color: colors.text },
+  detectedCategoryName: { fontWeight: '700', color: colors.success },
+  disabled: { opacity: 0.55 },
   progressBox: {
-    backgroundColor: '#fff3cd',
-    borderLeftWidth: 3,
-    borderLeftColor: '#ffc107',
-    padding: 12,
-    borderRadius: 4,
-    marginBottom: 16,
+    backgroundColor: `${colors.warning}18`, borderLeftWidth: 3, borderLeftColor: colors.warning,
+    padding: spacing.md, borderRadius: radius.sm, marginBottom: spacing.md,
   },
-  successBox: {
-    backgroundColor: '#d4edda',
-    borderLeftColor: '#28a745',
-  },
-  errorBox: {
-    backgroundColor: '#f8d7da',
-    borderLeftColor: '#dc3545',
-  },
-  progressText: {
-    fontSize: 13,
-    color: '#1a1a1a',
-  },
-  submitButton: {
-    backgroundColor: '#0066cc',
-    paddingVertical: 12,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  submitButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  errorText: {
-    fontSize: 16,
-    color: '#dc3545',
-    textAlign: 'center',
-    marginTop: 20,
-  },
+  progressSuccess: { backgroundColor: `${colors.success}18`, borderLeftColor: colors.success },
+  progressError: { backgroundColor: `${colors.danger}18`, borderLeftColor: colors.danger },
+  progressText: { fontSize: 13, color: colors.text, lineHeight: 20 },
 });

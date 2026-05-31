@@ -1,0 +1,56 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`SectionHeader matches the snapshot with subtitle 1`] = `
+<View
+  style={
+    {
+      "marginBottom": 12,
+    }
+  }
+>
+  <Text
+    style={
+      {
+        "color": "#2D2D2D",
+        "fontSize": 18,
+        "fontWeight": "800",
+      }
+    }
+  >
+    Evaluaciones
+  </Text>
+  <Text
+    style={
+      {
+        "color": "#666B73",
+        "fontSize": 13,
+        "marginTop": 4,
+      }
+    }
+  >
+    3 pendientes
+  </Text>
+</View>
+`;
+
+exports[`SectionHeader matches the snapshot without subtitle 1`] = `
+<View
+  style={
+    {
+      "marginBottom": 12,
+    }
+  }
+>
+  <Text
+    style={
+      {
+        "color": "#2D2D2D",
+        "fontSize": 18,
+        "fontWeight": "800",
+      }
+    }
+  >
+    Comentarios
+  </Text>
+</View>
+`;

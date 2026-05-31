@@ -1,5 +1,5 @@
 import { TeacherRepository } from '../repositories/teacherRepositoryImpl';
-import { TeacherCourseOverview, CsvSyncResult, EvaluationCycleData } from '../../domain/entities/academic';
+import { TeacherCourseOverview, CsvSyncResult, EvaluationCycleData, EvaluationScope } from '../../domain/entities/academic';
 
 export class GetTeacherCoursesUseCase {
   constructor(private repository: TeacherRepository) {}
@@ -53,12 +53,12 @@ export class SyncCsvUseCase {
 export class GetEvaluationCyclesUseCase {
   constructor(private repository: TeacherRepository) {}
 
-  async execute(groupId: string): Promise<EvaluationCycleData[]> {
-    if (!groupId.trim()) {
-      throw new Error('El ID del grupo es requerido');
+  async execute(categoryId: string): Promise<EvaluationCycleData[]> {
+    if (!categoryId.trim()) {
+      throw new Error('El ID de la categoría es requerido');
     }
 
-    return this.repository.getEvaluationCyclesByGroup(groupId);
+    return this.repository.getEvaluationCyclesByCategory(categoryId);
   }
 }
 
@@ -67,17 +67,18 @@ export class CreateEvaluationCycleUseCase {
 
   async execute(input: {
     courseId: string;
-    groupId: string;
+    categoryId: string;
     title: string;
     openedBy: string;
     rubrics: string[];
     closesAt?: string | null;
+    evaluationScope: EvaluationScope;
   }): Promise<EvaluationCycleData | null> {
     if (!input.courseId.trim()) {
       throw new Error('El ID del curso es requerido');
     }
-    if (!input.groupId.trim()) {
-      throw new Error('El ID del grupo es requerido');
+    if (!input.categoryId.trim()) {
+      throw new Error('El ID de la categoría es requerido');
     }
     if (!input.title.trim()) {
       throw new Error('El título del ciclo es requerido');

@@ -1,521 +1,353 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
   ActivityIndicator,
-  TouchableOpacity,
-  RefreshControl,
   Alert,
-  Modal,
-  TextInput,
-  Switch,
-  Dimensions,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useTeacher } from '../../contexts/TeacherContext';
 
-export const EvaluationResponsesScreen = ({ route, navigation }: any) => {
-  const { cycleId, cycleName } = route.params;
-  const { selectedCourse } = useTeacher();
-  const [responses, setResponses] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+import { colors, radius, spacing } from '../../../core/theme';
+import { DashboardConsolidated, EvaluationResult } from '../../../domain/entities/academic';
+import { dashboardUseCases } from '../../../di/container';
+
+const scoreColor = (score: number) => {
+  if (score >= 4.0) return colors.success;
+  if (score >= 3.0) return colors.warning;
+  return colors.danger;
+};
+
+const initials = (name: string, fallback: string) => {
+  if (name?.trim()) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2 && parts[0] && parts[1]) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    return name.trim().slice(0, 2).toUpperCase();
+  }
+  return (fallback || '?').slice(0, 2).toUpperCase();
+};
+
+export const EvaluationResponsesScreen = ({ route }: any) => {
+  const { cycleId } = route?.params ?? {};
+
+  const [data, setData] = useState<DashboardConsolidated | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [filterSubmitted, setFilterSubmitted] = useState<boolean | null>(null);
-  const [filterStudent, setFilterStudent] = useState('');
-  const [showFilterModal, setShowFilterModal] = useState(false);
 
   useEffect(() => {
-    loadResponses();
+    if (cycleId) load();
+    else setIsLoading(false);
   }, [cycleId]);
 
-  const loadResponses = async () => {
+  const load = async () => {
+    setIsLoading(true);
     try {
-      setIsLoading(true);
-      // TODO: Fetch evaluation responses from TeacherRemoteDataSource
-      // For now, placeholder
-      setResponses([]);
-    } catch (error) {
-      Alert.alert('Error', 'No se pudieron cargar las respuestas');
+      const result = await dashboardUseCases.getEvaluationResults.executeForTeacher(cycleId);
+      setData(result);
+    } catch {
+      Alert.alert('Error', 'No se pudieron cargar los resultados');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadResponses();
-    setRefreshing(false);
-  };
+  const onRefresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
-  const filteredResponses = responses.filter((resp: any) => {
-    if (filterSubmitted !== null && resp.submitted !== filterSubmitted) return false;
-    if (filterStudent && !resp.studentName.toLowerCase().includes(filterStudent.toLowerCase()))
-      return false;
-    return true;
-  });
-
-  const renderResponseItem = ({ item }: any) => (
-    <TouchableOpacity
-      style={styles.responseCard}
-      onPress={() =>
-        navigation.navigate('DetailedResponseScreen', {
-          responseId: item.id,
-          studentName: item.studentName,
-          score: item.score,
-        })
-      }
-    >
-      <View style={styles.responseHeader}>
-        <View>
-          <Text style={styles.studentName}>{item.studentName}</Text>
-          <Text style={styles.studentEmail}>{item.email}</Text>
-        </View>
-        {item.submitted ? (
-          <View style={styles.statusBadge}>
-            <MaterialCommunityIcons name="check" size={14} color="#fff" />
-            <Text style={styles.statusText}>Enviado</Text>
-          </View>
-        ) : (
-          <View style={[styles.statusBadge, styles.pendingBadge]}>
-            <MaterialCommunityIcons name="clock-outline" size={14} color="#fff" />
-            <Text style={styles.statusText}>Pendiente</Text>
-          </View>
-        )}
+  if (isLoading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
+    );
+  }
 
-      {item.submitted && (
-        <View style={styles.responseStats}>
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Puntaje</Text>
-            <Text style={styles.statValue}>{item.score?.toFixed(1) || 'N/A'}</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Respuestas</Text>
-            <Text style={styles.statValue}>{item.answersCount || 0}</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Completitud</Text>
-            <Text style={styles.statValue}>{item.completeness || 0}%</Text>
-          </View>
+  if (!data || !cycleId) {
+    return (
+      <View style={styles.center}>
+        <View style={styles.emptyIconBox}>
+          <MaterialCommunityIcons name="chart-box-outline" size={44} color={colors.primary} />
         </View>
-      )}
+        <Text style={styles.emptyTitle}>Sin datos</Text>
+        <Text style={styles.emptySubtitle}>No se encontraron resultados para este ciclo.</Text>
+      </View>
+    );
+  }
 
-      <Text style={styles.submittedDate}>
-        {item.submitted
-          ? `Enviado: ${new Date(item.submittedAt).toLocaleDateString()}`
-          : 'No enviado'}
-      </Text>
-    </TouchableOpacity>
-  );
-
-  const getStats = () => {
-    return {
-      total: responses.length,
-      submitted: responses.filter((r: any) => r.submitted).length,
-      pending: responses.filter((r: any) => !r.submitted).length,
-      averageScore:
-        responses.length > 0
-          ? (
-              responses.reduce((sum: number, r: any) => sum + (r.score || 0), 0) /
-              responses.length
-            ).toFixed(1)
-          : 0,
-    };
-  };
-
-  const stats = getStats();
+  const completionRate = data.totalStudents > 0
+    ? (data.evaluatedStudents / data.totalStudents) * 100
+    : 0;
+  const completionColor = completionRate >= 70 ? colors.success : colors.warning;
+  const avgColor = scoreColor(data.groupAverage);
 
   return (
-    <View style={styles.container}>
-      {/* Header Stats */}
-      <View style={styles.statsContainer}>
-        <View style={styles.statBox}>
-          <Text style={styles.statBoxValue}>{stats.submitted}</Text>
-          <Text style={styles.statBoxLabel}>Enviadas</Text>
+    <ScrollView
+      style={styles.root}
+      showsVerticalScrollIndicator={false}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+    >
+      {/* Cycle header */}
+      <View style={styles.cycleHeader}>
+        <View style={styles.cycleIconBox}>
+          <MaterialCommunityIcons name="chart-box" size={22} color={colors.primary} />
         </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statBoxValue}>{stats.pending}</Text>
-          <Text style={styles.statBoxLabel}>Pendientes</Text>
-        </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statBoxValue}>{stats.averageScore}</Text>
-          <Text style={styles.statBoxLabel}>Promedio</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.cycleLabel}>EVALUACIÓN</Text>
+          <Text style={styles.cycleTitle} numberOfLines={2}>{data.cycleTitle}</Text>
         </View>
       </View>
 
-      {/* Filter Bar */}
-      <View style={styles.filterBar}>
-        <TouchableOpacity
-          style={styles.filterButton}
-          onPress={() => setShowFilterModal(true)}
-        >
-          <MaterialCommunityIcons name="filter" size={18} color="#0066cc" />
-          <Text style={styles.filterButtonText}>Filtros</Text>
-        </TouchableOpacity>
-
-        {(filterSubmitted !== null || filterStudent) && (
-          <TouchableOpacity
-            style={styles.clearButton}
-            onPress={() => {
-              setFilterSubmitted(null);
-              setFilterStudent('');
-            }}
-          >
-            <Text style={styles.clearButtonText}>Limpiar</Text>
-          </TouchableOpacity>
-        )}
+      {/* KPI grid */}
+      <View style={styles.kpiGrid}>
+        <KpiCard label="Promedio general" value={data.groupAverage.toFixed(2)} icon="star-outline" color={avgColor} />
+        <KpiCard label="Evaluados" value={`${data.evaluatedStudents}/${data.totalStudents}`} icon="account-group" color={colors.info} />
+        <KpiCard label="Pendientes" value={String(data.pendingStudents)} icon="clock-outline" color={data.pendingStudents > 0 ? colors.warning : colors.success} />
+        <KpiCard label="Evaluaciones" value={String(data.totalEvaluationsSubmitted)} icon="check-circle-outline" color={colors.textMuted} />
       </View>
 
-      {/* Responses List */}
-      {isLoading ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#0066cc" />
+      {/* Completion rate */}
+      <View style={styles.card}>
+        <View style={styles.coverageRow}>
+          <Text style={styles.cardLabel}>Cobertura de la actividad</Text>
+          <Text style={[styles.coveragePercent, { color: completionColor }]}>{completionRate.toFixed(1)}%</Text>
         </View>
-      ) : (
-        <FlatList
-          data={filteredResponses}
-          renderItem={renderResponseItem}
-          keyExtractor={(item: any) => item.id}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          contentContainerStyle={filteredResponses.length === 0 ? { flex: 1 } : undefined}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <MaterialCommunityIcons
-                name="inbox-outline"
-                size={48}
-                color="#ccc"
-              />
-              <Text style={styles.emptyText}>No hay respuestas</Text>
-            </View>
-          }
-        />
+        <View style={styles.barTrack}>
+          <View style={[styles.barFill, { width: `${Math.min(completionRate, 100)}%` as any, backgroundColor: completionColor }]} />
+        </View>
+      </View>
+
+      {/* Rubric averages */}
+      {Object.keys(data.rubricAverages).length > 0 && (
+        <View style={styles.card}>
+          <Text style={styles.sectionLabel}>Promedio por criterio</Text>
+          {Object.entries(data.rubricAverages).map(([rubric, value]) => (
+            <RubricBar key={rubric} rubric={rubric} value={value} />
+          ))}
+        </View>
       )}
 
-      {/* Filter Modal */}
-      <Modal
-        visible={showFilterModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowFilterModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.filterModal}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Filtros</Text>
-              <TouchableOpacity onPress={() => setShowFilterModal(false)}>
-                <MaterialCommunityIcons name="close" size={24} color="#666" />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.filterSection}>
-              <Text style={styles.filterSectionTitle}>Estado</Text>
-              <View style={styles.filterOptions}>
-                <TouchableOpacity
-                  style={[
-                    styles.filterOption,
-                    filterSubmitted === null && styles.filterOptionActive,
-                  ]}
-                  onPress={() => setFilterSubmitted(null)}
-                >
-                  <Text
-                    style={[
-                      styles.filterOptionText,
-                      filterSubmitted === null && styles.filterOptionTextActive,
-                    ]}
-                  >
-                    Todos
+      {/* Group stats */}
+      {data.groupStats.length > 0 && (
+        <View style={styles.card}>
+          <Text style={styles.sectionLabel}>Estadísticas por grupo</Text>
+          {data.groupStats.map((stat) => {
+            const c = scoreColor(stat.averageScore);
+            return (
+              <View key={stat.groupId} style={styles.groupStatRow}>
+                <View style={[styles.groupStatIcon, { backgroundColor: `${c}20` }]}>
+                  <MaterialCommunityIcons name="account-group" size={18} color={c} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.groupStatName}>{stat.groupName || 'Grupo'}</Text>
+                  <Text style={styles.groupStatSub}>
+                    Evaluados {stat.evaluatedStudents}/{stat.totalStudents} · Pendientes {stat.pendingStudents}
                   </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.filterOption,
-                    filterSubmitted === true && styles.filterOptionActive,
-                  ]}
-                  onPress={() => setFilterSubmitted(true)}
-                >
-                  <Text
-                    style={[
-                      styles.filterOptionText,
-                      filterSubmitted === true && styles.filterOptionTextActive,
-                    ]}
-                  >
-                    Enviados
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.filterOption,
-                    filterSubmitted === false && styles.filterOptionActive,
-                  ]}
-                  onPress={() => setFilterSubmitted(false)}
-                >
-                  <Text
-                    style={[
-                      styles.filterOptionText,
-                      filterSubmitted === false && styles.filterOptionTextActive,
-                    ]}
-                  >
-                    Pendientes
-                  </Text>
-                </TouchableOpacity>
+                </View>
+                <View style={[styles.scorePill, { backgroundColor: `${c}15` }]}>
+                  <Text style={[styles.scorePillText, { color: c }]}>{stat.averageScore.toFixed(2)}</Text>
+                </View>
               </View>
-            </View>
-
-            <View style={styles.filterSection}>
-              <Text style={styles.filterSectionTitle}>Buscar Estudiante</Text>
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Nombre o email..."
-                value={filterStudent}
-                onChangeText={setFilterStudent}
-              />
-            </View>
-
-            <TouchableOpacity
-              style={styles.applyButton}
-              onPress={() => setShowFilterModal(false)}
-            >
-              <Text style={styles.applyButtonText}>Aplicar Filtros</Text>
-            </TouchableOpacity>
-          </View>
+            );
+          })}
         </View>
-      </Modal>
-    </View>
+      )}
+
+      {/* Top / Low */}
+      {(data.topStudents.length > 0 || data.lowStudents.length > 0) && (
+        <View style={styles.rankingRow}>
+          <RankingCard title="Top rendimiento" icon="trophy-outline" accent={colors.success} students={data.topStudents} />
+          <RankingCard title="Requieren apoyo" icon="hand-heart-outline" accent={colors.warning} students={data.lowStudents} />
+        </View>
+      )}
+
+      {/* Student table */}
+      {data.results.length > 0 && (
+        <View style={styles.card}>
+          <Text style={styles.sectionLabel}>Detalle por estudiante</Text>
+          <View style={styles.tableHeader}>
+            <Text style={[styles.tableCell, { flex: 2 }]}>Estudiante</Text>
+            <Text style={styles.tableCell}>Promedio</Text>
+            <Text style={styles.tableCell}>Eval.</Text>
+          </View>
+          {data.results.map((result) => {
+            const c = scoreColor(result.averageTotal);
+            return (
+              <View key={result.id} style={styles.tableRow}>
+                <View style={{ flex: 2 }}>
+                  <Text style={styles.studentName} numberOfLines={1}>
+                    {result.evaluatee.name || result.evaluatee.uid}
+                  </Text>
+                  {result.groupName ? (
+                    <Text style={styles.studentSub}>{result.groupName}</Text>
+                  ) : null}
+                </View>
+                <Text style={[styles.tableCell, styles.tableCellBold, { color: c }]}>
+                  {result.averageTotal > 0 ? result.averageTotal.toFixed(2) : '—'}
+                </Text>
+                <Text style={[styles.tableCell, { color: colors.textMuted }]}>
+                  {result.totalEvaluators}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      <View style={{ height: spacing.xl }} />
+    </ScrollView>
   );
 };
 
+function KpiCard({ label, value, icon, color }: { label: string; value: string; icon: string; color: string }) {
+  return (
+    <View style={styles.kpiCard}>
+      <View style={[styles.kpiStripe, { backgroundColor: color }]} />
+      <View style={[styles.kpiIconBox, { backgroundColor: `${color}18` }]}>
+        <MaterialCommunityIcons name={icon as any} size={18} color={color} />
+      </View>
+      <View style={styles.kpiContent}>
+        <Text style={styles.kpiLabel} numberOfLines={2}>{label}</Text>
+        <Text style={[styles.kpiValue, { color }]}>{value}</Text>
+      </View>
+    </View>
+  );
+}
+
+function RubricBar({ rubric, value }: { rubric: string; value: number }) {
+  const c = scoreColor(value);
+  return (
+    <View style={styles.rubricBlock}>
+      <View style={styles.rubricHeader}>
+        <Text style={styles.rubricLabel} numberOfLines={1}>{rubric}</Text>
+        <Text style={[styles.rubricValue, { color: c }]}>{value.toFixed(2)}</Text>
+      </View>
+      <View style={styles.barTrack}>
+        <View style={[styles.barFill, { width: `${(value / 5) * 100}%` as any, backgroundColor: c }]} />
+      </View>
+    </View>
+  );
+}
+
+function RankingCard({ title, icon, accent, students }: { title: string; icon: string; accent: string; students: EvaluationResult[] }) {
+  return (
+    <View style={styles.rankingCard}>
+      <View style={styles.rankingCardHeader}>
+        <MaterialCommunityIcons name={icon as any} size={14} color={accent} />
+        <Text style={styles.rankingCardTitle} numberOfLines={1}>{title}</Text>
+      </View>
+      {students.length === 0 ? (
+        <Text style={styles.rankingEmpty}>Sin datos</Text>
+      ) : (
+        students.map((s) => {
+          const c = scoreColor(s.averageTotal);
+          return (
+            <View key={s.id} style={styles.rankingItem}>
+              <View style={[styles.rankingAvatar, { backgroundColor: `${c}18` }]}>
+                <Text style={[styles.rankingInitials, { color: c }]}>
+                  {initials(s.evaluatee.name, s.evaluatee.uid)}
+                </Text>
+              </View>
+              <Text style={styles.rankingName} numberOfLines={1}>
+                {s.evaluatee.name || s.evaluatee.uid}
+              </Text>
+              <Text style={[styles.rankingScore, { color: c }]}>
+                {s.averageTotal.toFixed(2)}
+              </Text>
+            </View>
+          );
+        })
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
+  root: { flex: 1, backgroundColor: colors.background },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xxl },
+  emptyIconBox: {
+    width: 88, height: 88, borderRadius: radius.xl,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg,
   },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  emptyTitle: { color: colors.text, fontSize: 18, fontWeight: '900' },
+  emptySubtitle: { color: colors.textMuted, fontSize: 13, marginTop: spacing.xs, textAlign: 'center' },
+
+  cycleHeader: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.surface,
+    margin: spacing.md, padding: spacing.md,
+    borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, gap: spacing.md,
   },
-  statsContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    gap: 8,
+  cycleIconBox: {
+    width: 44, height: 44, borderRadius: radius.md,
+    backgroundColor: colors.primarySoft,
+    justifyContent: 'center', alignItems: 'center',
   },
-  statBox: {
-    flex: 1,
-    backgroundColor: '#fff',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
+  cycleLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.8, color: colors.textMuted, marginBottom: 2 },
+  cycleTitle: { fontSize: 15, fontWeight: '700', color: colors.text },
+
+  kpiGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: spacing.md, gap: spacing.sm, marginBottom: spacing.xs },
+  kpiCard: {
+    width: '47%', backgroundColor: colors.surface,
+    borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border,
+    flexDirection: 'row', alignItems: 'center', padding: spacing.sm, gap: spacing.sm, overflow: 'hidden',
   },
-  statBoxValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#0066cc',
+  kpiStripe: { width: 4, alignSelf: 'stretch', borderRadius: 2 },
+  kpiIconBox: { width: 34, height: 34, borderRadius: radius.sm, justifyContent: 'center', alignItems: 'center' },
+  kpiContent: { flex: 1 },
+  kpiLabel: { fontSize: 10, color: colors.textMuted, fontWeight: '600', lineHeight: 13 },
+  kpiValue: { fontSize: 17, fontWeight: '700', marginTop: 2 },
+
+  card: {
+    backgroundColor: colors.surface, margin: spacing.md, marginTop: spacing.sm,
+    borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: colors.border,
   },
-  statBoxLabel: {
-    fontSize: 11,
-    color: '#999',
-    marginTop: 4,
+  cardLabel: { fontSize: 14, fontWeight: '700', color: colors.text },
+  sectionLabel: { fontSize: 14, fontWeight: '700', color: colors.text, marginBottom: spacing.md },
+
+  coverageRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
+  coveragePercent: { fontSize: 14, fontWeight: '700' },
+
+  barTrack: { height: 7, backgroundColor: colors.border, borderRadius: radius.pill, overflow: 'hidden' },
+  barFill: { height: '100%', borderRadius: radius.pill },
+
+  rubricBlock: { marginBottom: spacing.sm },
+  rubricHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.xs },
+  rubricLabel: { flex: 1, fontSize: 13, color: colors.text, fontWeight: '500' },
+  rubricValue: { fontSize: 13, fontWeight: '700' },
+
+  groupStatRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
+  groupStatIcon: { width: 38, height: 38, borderRadius: radius.sm, justifyContent: 'center', alignItems: 'center' },
+  groupStatName: { fontSize: 14, fontWeight: '700', color: colors.text },
+  groupStatSub: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
+  scorePill: { paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: radius.sm },
+  scorePillText: { fontSize: 14, fontWeight: '700' },
+
+  rankingRow: { flexDirection: 'row', paddingHorizontal: spacing.md, gap: spacing.sm, marginBottom: spacing.xs },
+  rankingCard: {
+    flex: 1, backgroundColor: colors.surface,
+    borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: colors.border,
   },
-  filterBar: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 8,
+  rankingCardHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
+  rankingCardTitle: { fontSize: 12, fontWeight: '700', color: colors.text, flex: 1 },
+  rankingEmpty: { fontSize: 12, color: colors.textMuted },
+  rankingItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
+  rankingAvatar: { width: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center' },
+  rankingInitials: { fontSize: 9, fontWeight: '900' },
+  rankingName: { flex: 1, fontSize: 12, color: colors.text, fontWeight: '500' },
+  rankingScore: { fontSize: 12, fontWeight: '700' },
+
+  tableHeader: {
+    flexDirection: 'row', paddingVertical: spacing.sm,
+    borderBottomWidth: 1, borderBottomColor: colors.border, marginBottom: spacing.xs,
   },
-  filterButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#0066cc',
-    borderRadius: 6,
-    gap: 6,
+  tableRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.background,
   },
-  filterButtonText: {
-    color: '#0066cc',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  clearButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: '#dc3545',
-    borderRadius: 6,
-  },
-  clearButtonText: {
-    color: '#dc3545',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  responseCard: {
-    marginHorizontal: 12,
-    marginVertical: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  responseHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 8,
-  },
-  studentName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1a1a1a',
-  },
-  studentEmail: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 2,
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: '#28a745',
-    borderRadius: 4,
-  },
-  pendingBadge: {
-    backgroundColor: '#ffc107',
-  },
-  statusText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  responseStats: {
-    flexDirection: 'row',
-    gap: 12,
-    marginVertical: 8,
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statLabel: {
-    fontSize: 11,
-    color: '#999',
-  },
-  statValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#0066cc',
-    marginTop: 2,
-  },
-  submittedDate: {
-    fontSize: 11,
-    color: '#bbb',
-    marginTop: 4,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 14,
-    color: '#999',
-    marginTop: 8,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  filterModal: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1a1a1a',
-  },
-  filterSection: {
-    marginBottom: 20,
-  },
-  filterSectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a1a',
-    marginBottom: 8,
-  },
-  filterOptions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  filterOption: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-  filterOptionActive: {
-    borderColor: '#0066cc',
-    backgroundColor: '#e6f0ff',
-  },
-  filterOptionText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#666',
-  },
-  filterOptionTextActive: {
-    color: '#0066cc',
-  },
-  searchInput: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 6,
-    fontSize: 13,
-  },
-  applyButton: {
-    paddingVertical: 12,
-    backgroundColor: '#0066cc',
-    borderRadius: 6,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  applyButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  tableCell: { flex: 1, fontSize: 13, color: colors.textMuted, fontWeight: '600' },
+  tableCellBold: { fontWeight: '700' },
+  studentName: { fontSize: 13, fontWeight: '700', color: colors.text },
+  studentSub: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
 });
