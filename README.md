@@ -52,6 +52,9 @@ Luego abre la app en Android, iOS o web desde Expo.
 - El repositorio decide si responde con datos remotos o cacheados.
 - El nuevo requisito de evaluación se modela por `categoryId`.
 
-## Recursos
+## Primera Entrega
+- Video relevante vista estudiante React Native y vista profesor Flutter: https://www.youtube.com/watch?v=yxrP6QyMbAA
 
-- Video relevante: https://www.youtube.com/watch?v=yxrP6QyMbAA
+## Entrega Final
+- Video relevante vista estudiante Flutter y vista profedor React Native: https://youtu.be/MnWKkQIDpeg
+- Video Pruebas React Native: https://youtu.be/8KcEKDCW98k
